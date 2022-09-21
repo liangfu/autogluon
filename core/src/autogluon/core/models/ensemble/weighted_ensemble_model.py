@@ -9,6 +9,63 @@ from ..greedy_ensemble.greedy_weighted_ensemble_model import GreedyWeightedEnsem
 
 logger = logging.getLogger(__name__)
 
+class EnsembleOnnxCompiler:
+    name = 'onnx'
+    save_in_pkl = False
+
+    @staticmethod
+    def can_compile():
+        try:
+            import skl2onnx
+            return True
+        except ImportError:
+            return False
+
+    @staticmethod
+    def compile(obj, path: str):
+        print('compiling')
+        # Convert into ONNX format
+        from skl2onnx import convert_sklearn
+        from skl2onnx.common.data_types import FloatTensorType
+        from sklearn.pipeline import Pipeline
+
+        import pdb
+        pdb.set_trace()
+        for model in obj.models:
+            name = model.base_model_names[0]
+            base_model = obj.load_model(name)
+            print(base_model)
+                
+        pipe = Pipeline(steps=[('model', naive_bayes_model)])
+        initial_type = [('float_input', FloatTensorType([None, obj._num_features_post_process]))]
+        onx = convert_sklearn(obj.model, initial_types=initial_type)
+
+        import os
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path + "model.onnx", "wb") as f:
+            f.write(onx.SerializeToString())
+        return EnsembleOnnxCompiler.load(obj=obj, path=path)
+
+    @staticmethod
+    def load(obj, path: str):
+        import onnxruntime as rt
+        model = rt.InferenceSession(path + "model.onnx")
+        return EnsembleOnnxPredictor(obj=obj, model=model)
+
+    # @staticmethod
+    # def predict(obj, X):
+    #     input_name = obj._model_onnx.get_inputs()[0].name
+    #     label_name = obj._model_onnx.get_outputs()[0].name
+    #     return obj._model_onnx.run([label_name], {input_name: X})[0]
+    #
+    # @staticmethod
+    # def predict_proba(obj, X):
+    #     input_name = obj._model_onnx.get_inputs()[0].name
+    #     label_name = obj._model_onnx.get_outputs()[1].name
+    #     pred_proba = obj._model_onnx.run([label_name], {input_name: X})[0]
+    #     pred_proba = np.array([[r[i] for i in range(obj.num_classes)] for r in pred_proba])
+    #     return pred_proba
+
 
 # TODO: v0.1 see if this can be removed and logic moved to greedy weighted ensemble model -> Use StackerEnsembleModel as stacker instead
 # TODO: Optimize predict speed when fit on kfold, can simply sum weights
@@ -72,3 +129,40 @@ class WeightedEnsembleModel(StackerEnsembleModel):
         for param, val in default_params.items():
             self._set_default_param_value(param, val)
         super()._set_default_params()
+
+    # TODO: Pick up from here, rename to save, implement _get_compiler(), etc.
+    def compile(self, path: str = None, verbose=True) -> str:
+        if path is None:
+            path = self.path
+        file_path = path + self.model_file_name
+        save_in_pkl = True
+        if self.models is not None:
+            self._compiler = self._get_compiler()
+            if self._compiler is not None:
+                self.models = self._compiler.compile(obj=self, path=path)
+                save_in_pkl = self._compiler.save_in_pkl
+        _models = self.models
+        if not save_in_pkl:
+            self.models = None
+        save_pkl.save(path=file_path, object=self, verbose=verbose)
+        self.models = _models
+        return path
+
+    def _valid_compilers(self):
+        return [EnsembleOnnxCompiler]
+
+    def _get_compiler(self):
+        # import pdb
+        # pdb.set_trace()
+        compiler = self.params_aux.get('compiler', None)
+        compilers = self._valid_compilers()
+        compiler_names = {c.name: c for c in compilers}
+        if compiler is not None and compiler not in compiler_names:
+            raise AssertionError(f'Unknown compiler: {compiler}. Valid compilers: {compiler_names}')
+        if compiler is None:
+            return EnsembleOnnxCompiler
+        compiler_cls = compiler_names[compiler]
+        if not compiler_cls.can_compile():
+            compiler_cls = EnsembleOnnxCompiler
+        return compiler_cls
+

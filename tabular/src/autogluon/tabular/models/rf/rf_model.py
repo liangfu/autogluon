@@ -20,19 +20,21 @@ logger = logging.getLogger(__name__)
 
 # FIXME: DOESNT WORK ON REGRESSION PREDICTIONS
 class RFOnnxPredictor:
-    def __init__(self, obj, model):
+    def __init__(self, obj, model, path):
+        import onnxruntime as rt
         self.num_classes = obj.num_classes
         self.model = model
+        self._sess = rt.InferenceSession(path + "model.onnx")
 
     def predict(self, X):
-        input_name = self.model.get_inputs()[0].name
-        label_name = self.model.get_outputs()[0].name
-        return self.model.run([label_name], {input_name: X})[0]
+        input_name = self._sess.get_inputs()[0].name
+        label_name = self._sess.get_outputs()[0].name
+        return self._sess.run([label_name], {input_name: X})[0]
 
     def predict_proba(self, X):
-        input_name = self.model.get_inputs()[0].name
-        label_name = self.model.get_outputs()[1].name
-        pred_proba = self.model.run([label_name], {input_name: X})[0]
+        input_name = self._sess.get_inputs()[0].name
+        label_name = self._sess.get_outputs()[1].name
+        pred_proba = self._sess.run([label_name], {input_name: X})[0]
         pred_proba = np.array([[r[i] for i in range(self.num_classes)] for r in pred_proba])
         return pred_proba
 
@@ -56,6 +58,8 @@ class RFOnnxCompiler:
         from skl2onnx import convert_sklearn
         from skl2onnx.common.data_types import FloatTensorType
         initial_type = [('float_input', FloatTensorType([None, obj._num_features_post_process]))]
+        # import pdb
+        # pdb.set_trace()
         onx = convert_sklearn(obj.model, initial_types=initial_type)
         import os
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -65,9 +69,11 @@ class RFOnnxCompiler:
 
     @staticmethod
     def load(obj, path: str):
-        import onnxruntime as rt
-        model = rt.InferenceSession(path + "model.onnx")
-        return RFOnnxPredictor(obj=obj, model=model)
+        # import onnxruntime as rt
+        # model = rt.InferenceSession(path + "model.onnx")
+        import onnx
+        model = onnx.load(path + "model.onnx")
+        return RFOnnxPredictor(obj=obj, model=model, path=path)
 
     # @staticmethod
     # def predict(obj, X):
@@ -300,7 +306,10 @@ class RFModel(AbstractModel):
         from skl2onnx import convert_sklearn
         from skl2onnx.common.data_types import FloatTensorType
         initial_type = [('float_input', FloatTensorType([None, self._num_features_post_process]))]
-        onx = convert_sklearn(self.model, initial_types=initial_type)
+        # import pdb
+        # pdb.set_trace()
+        # onx = convert_sklearn(self.model, initial_types=initial_type)
+        onx = self.model.model
         import os
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path + "model.onnx", "wb") as f:

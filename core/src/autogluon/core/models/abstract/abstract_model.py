@@ -251,6 +251,7 @@ class AbstractModel:
             # TODO: v0.1 Document get_features_kwargs_extra in task.fit
             get_features_kwargs_extra=None,  # If not None, applies an additional feature filter to the result of get_feature_kwargs. This should be reserved for users and be None by default. | Currently undocumented in task.
             predict_1_batch_size=None,  # If not None, calculates `self.predict_1_time` at end of fit call by predicting on this many rows of data.
+            compiler='onnx',
         )
         return default_auxiliary_params
 
