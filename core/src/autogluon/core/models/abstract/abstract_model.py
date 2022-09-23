@@ -887,6 +887,9 @@ class AbstractModel:
         self.model = _model
         return path
 
+    def _get_compiler(self):
+        return None
+
     def get_trained_params(self) -> dict:
         """
         Returns the hyperparameters of the trained model.

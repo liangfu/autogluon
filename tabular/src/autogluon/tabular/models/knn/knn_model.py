@@ -23,6 +23,7 @@ class KNNModel(AbstractModel):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._X_unused_index = None  # Keeps track of unused training data indices, necessary for LOO OOF generation
+        self._num_features_post_process = None
 
     def _get_model_type(self):
         if self.params_aux.get('use_daal', True):
@@ -89,6 +90,7 @@ class KNNModel(AbstractModel):
              **kwargs):
         time_start = time.time()
         X = self.preprocess(X)
+        self._num_features_post_process = X.shape[1]
         params = self._get_model_params()
         if 'n_jobs' not in params:
             params['n_jobs'] = num_cpus
@@ -117,6 +119,56 @@ class KNNModel(AbstractModel):
                 logger.warning(f'\tWarning: Model is expected to require {round(model_memory_ratio * 100, 2)}% of available memory...')
             if model_memory_ratio > (0.20 * max_memory_usage_ratio):
                 raise NotEnoughMemoryError  # don't train full model to avoid OOM error
+
+    def compile(self):
+        path = self.path
+        print('compiling')
+        # Convert into ONNX format
+        from skl2onnx import convert_sklearn
+        from skl2onnx.common.data_types import FloatTensorType
+        initial_type = [('float_input', FloatTensorType([None, self._num_features_post_process]))]
+        # import pdb
+        # pdb.set_trace()
+        onx = convert_sklearn(self.model, initial_types=initial_type)
+
+        ########################################################
+        # HACK, HACK, HACK
+        if onx.graph.initializer[0].data_type == 2:
+            onx.graph.initializer[0].data_type = 6
+        ########################################################
+
+        # onx = self.model.model
+        import os
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path + "model.onnx", "wb") as f:
+            f.write(onx.SerializeToString())
+        with open(path + "model_onnx.txt", "wt") as f:
+            f.write(str(onx))
+
+        # Compute the prediction with ONNX Runtime
+        import onnxruntime as rt
+        # import numpy as np
+        self._model_onnx = rt.InferenceSession(onx.SerializeToString())
+        # input_name = sess.get_inputs()[0].name
+        # label_name = sess.get_outputs()[0].name
+        # pred_onx = sess.run([label_name], {input_name: X_test.astype(numpy.float32)})[0]
+
+    def _load_onnx(self, path: str):
+        import onnxruntime as rt
+        sess = rt.InferenceSession(path + "model.onnx")
+        return sess
+
+    def _predict_onnx(self, X):
+        input_name = self._model_onnx.get_inputs()[0].name
+        label_name = self._model_onnx.get_outputs()[0].name
+        return self._model_onnx.run([label_name], {input_name: X})[0]
+
+    def _predict_proba_onnx(self, X):
+        input_name = self._model_onnx.get_inputs()[0].name
+        label_name = self._model_onnx.get_outputs()[1].name
+        pred_proba = self._model_onnx.run([label_name], {input_name: X})[0]
+        pred_proba = np.array([[r[i] for i in range(self.num_classes)] for r in pred_proba])
+        return pred_proba
 
     # TODO: Won't work for RAPIDS without modification
     # TODO: Technically isn't OOF, but can be used inplace of OOF. Perhaps rename to something more accurate?

@@ -300,7 +300,8 @@ class RFModel(AbstractModel):
         self.params_trained['n_estimators'] = self.model.n_estimators
         # self.compile(path=self.path)
 
-    def compile(self, path: str):
+    def compile(self):
+        path = self.path
         print('compiling')
         # Convert into ONNX format
         from skl2onnx import convert_sklearn

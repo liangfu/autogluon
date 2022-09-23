@@ -7,6 +7,7 @@ import autogluon.core as ag
 from autogluon.tabular import TabularDataset, TabularPredictor
 from autogluon.tabular.configs.hyperparameter_configs import get_hyperparameter_config
 import time
+from numpy.testing import assert_allclose
 
 def main():
 
@@ -22,7 +23,12 @@ def main():
         # 'GBM': {'num_boost_round': 1000, 'learning_rate': ag.Real(0.01, 0.1, log=True)},
         # 'XGB': {'n_estimators': 1000, 'learning_rate': ag.Real(0.01, 0.1, log=True)},
         'RF': {'ag_args': {'name_suffix': 'Gini', 'problem_types': ['binary', 'multiclass']}, 'criterion': 'gini'},
-        # 'KNN': {},
+        'KNN': {},
+        # 'NN_TORCH': {},
+        'XT': {},
+        # 'GBM': {},
+        # 'CAT': {},
+        # 'XGB': {},
     }
     # hyperparameters.update(get_hyperparameter_config('default'))
     print('\n'.join(list(get_hyperparameter_config('default').keys())))
@@ -32,11 +38,11 @@ def main():
     )
 
     results = predictor.fit_summary()  # display detailed summary of fit() process
-    print(results)
+    print(results["leaderboard"])
 
     # Inference time:
     test_data = TabularDataset('https://autogluon.s3.amazonaws.com/datasets/Inc/test.csv')  # another Pandas DataFrame
-    print(test_data.head())
+    # print(test_data.head())
 
     perf = predictor.evaluate(test_data)  # shorthand way to evaluate our predictor if test-labels are available
     # import pdb
@@ -47,15 +53,16 @@ def main():
     # best = trainer._get_best()
     # model = trainer.load_model(best)
     # models = model.models
+
     for name in model_names:
         model = trainer.load_model(name)
-        print(name, model)
         from autogluon.core.models.ensemble.weighted_ensemble_model import WeightedEnsembleModel
+        from autogluon.tabular.models.tabular_nn.torch.tabular_nn_torch import TabularNeuralNetTorchModel
         if isinstance(model, WeightedEnsembleModel):
             base_name = model.base_model_names[0]
             model = trainer.load_model(base_name)
-            print(name, model)
-        model.compile(path="./")
+        print(name, model)
+        model.compile()
 
         # import pdb
         # pdb.set_trace()
@@ -66,11 +73,20 @@ def main():
         print(f"pre elapsed: {(time.time() - tic)*1000.0:.0f} ms")
 
         tic = time.time()
-        y_pred_skl = model.model.predict_proba(X)
-        print(f"skl elapsed: {(time.time() - tic)*1000.0:.0f} ms")
-        tic = time.time()
-        y_pred_onx = model._predict_proba_onnx(X)
-        print(f"onx elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+        if isinstance(model, TabularNeuralNetTorchModel):
+            y_pred_pt = model._predict_tabular_data(X)
+            print(f"pt elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+        else:
+            # y_pred_skl = model.model.predict_proba(X)
+            y_pred_skl = model.model.predict(X)
+            print(f"skl elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+
+            tic = time.time()
+            # y_pred_onx = model._predict_proba_onnx(X)
+            y_pred_onx = model._predict_onnx(X)
+            print(f"onx elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+
+        assert_allclose(y_pred_skl, y_pred_onx)
         
 
     # Otherwise we make predictions and can evaluate them later:
