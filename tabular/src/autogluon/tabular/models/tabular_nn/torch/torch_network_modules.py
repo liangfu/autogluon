@@ -152,20 +152,7 @@ class EmbedNet(nn.Module):
             if hasattr(layer, 'reset_parameters'):
                 layer.reset_parameters()
 
-    def forward(self, data_batch):
-        input_data = []
-        if self.has_vector_features:
-            input_data.append(data_batch['vector'].to(self.device))
-        if self.has_embed_features:
-            embed_data = data_batch['embed']
-            for i in range(len(self.embed_blocks)):
-                input_data.append(self.embed_blocks[i](embed_data[i].to(self.device)))
-
-        if len(input_data) > 1:
-            input_data = torch.cat(input_data, dim=1)
-        else:
-            input_data = input_data[0]
-
+    def forward(self, input_data):
         output_data = self.main_block(input_data)
         if self.problem_type in [REGRESSION, QUANTILE]:  # output with y-range
             if self.y_constraint is None:
@@ -241,10 +228,40 @@ class EmbedNet(nn.Module):
             return loss_function(predict_data, target_data)
 
 
-    def predict(self, input_data):
+    def predict(self, data_batch):
+        # Convert data_batch (Dict[str, List[Tensor]]) into input_data (List[Tensor])
+        input_data = []
+        if self.has_vector_features:
+            if isinstance(data_batch['vector'], list):
+                input_data.append(data_batch['vector'][0].to(self.device))
+            else:
+                input_data.append(data_batch['vector'].to(self.device))
+        if self.has_embed_features:
+            embed_data = data_batch['embed']
+            for i in range(len(self.embed_blocks)):
+                input_data.append(self.embed_blocks[i](embed_data[i].to(self.device)))
+        if len(input_data) > 1:
+            input_data = torch.cat(input_data, dim=1)
+        else:
+            input_data = input_data[0]
+
         self.eval()
         with torch.no_grad():
             predict_data = self(input_data)
+            if self.problem_type == QUANTILE:
+                predict_data = torch.sort(predict_data, -1)[0]  # sorting ensures monotonicity of quantile estimates
+            elif self.problem_type in [BINARY, MULTICLASS, SOFTCLASS]:
+                predict_data = self.softmax(predict_data)  # convert NN output to probability
+            elif self.problem_type == REGRESSION:
+                predict_data = predict_data.flatten()
+            if self.problem_type == BINARY:
+                predict_data = predict_data[:,1]
+            return predict_data.data.cpu().numpy()
+
+    def predict_tvm(self, predict_data):
+        self.eval()
+        with torch.no_grad():
+            # predict_data = self(input_data)
             if self.problem_type == QUANTILE:
                 predict_data = torch.sort(predict_data, -1)[0]  # sorting ensures monotonicity of quantile estimates
             elif self.problem_type in [BINARY, MULTICLASS, SOFTCLASS]:

@@ -24,7 +24,7 @@ def main():
         # 'XGB': {'n_estimators': 1000, 'learning_rate': ag.Real(0.01, 0.1, log=True)},
         'RF': {'ag_args': {'name_suffix': 'Gini', 'problem_types': ['binary', 'multiclass']}, 'criterion': 'gini'},
         'KNN': {},
-        # 'NN_TORCH': {},
+        'NN_TORCH': {},
         'XT': {},
         # 'GBM': {},
         # 'CAT': {},
@@ -33,9 +33,11 @@ def main():
     # hyperparameters.update(get_hyperparameter_config('default'))
     print('\n'.join(list(get_hyperparameter_config('default').keys())))
 
-    predictor = TabularPredictor(label=label, path=save_path).fit(
-        train_data, hyperparameters=hyperparameters, hyperparameter_tune_kwargs='auto', time_limit=60
-    )
+    # predictor = TabularPredictor(label=label, path=save_path).fit(
+    #     train_data, hyperparameters=hyperparameters, hyperparameter_tune_kwargs='auto', time_limit=60
+    # )
+    # predictor.save()
+    predictor = TabularPredictor.load(path=save_path)
 
     results = predictor.fit_summary()  # display detailed summary of fit() process
     print(results["leaderboard"])
@@ -58,35 +60,42 @@ def main():
         model = trainer.load_model(name)
         from autogluon.core.models.ensemble.weighted_ensemble_model import WeightedEnsembleModel
         from autogluon.tabular.models.tabular_nn.torch.tabular_nn_torch import TabularNeuralNetTorchModel
+        from autogluon.tabular.models.knn.knn_model import KNNModel
+        from autogluon.tabular.models.rf.rf_model import RFModel
+        from autogluon.tabular.models.xt.xt_model import XTModel
         if isinstance(model, WeightedEnsembleModel):
             base_name = model.base_model_names[0]
             model = trainer.load_model(base_name)
         print(name, model)
         model.compile()
 
-        # import pdb
-        # pdb.set_trace()
-
         tic = time.time()
         X = predictor.transform_features(test_data)
         X = model.preprocess(X)
         print(f"pre elapsed: {(time.time() - tic)*1000.0:.0f} ms")
 
-        tic = time.time()
         if isinstance(model, TabularNeuralNetTorchModel):
-            y_pred_pt = model._predict_tabular_data(X)
-            print(f"pt elapsed: {(time.time() - tic)*1000.0:.0f} ms")
-        else:
-            # y_pred_skl = model.model.predict_proba(X)
+            tic = time.time()
+            y_pred_tch = model._predict_tabular_data(X)
+            print(f"tch elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+
+            tic = time.time()
+            y_pred_tvm = model._predict_tabular_data_tvm(X)
+            print(f"tvm elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+
+            assert_allclose(y_pred_tch, y_pred_tvm, rtol=1e-5, atol=1e-5)
+        elif isinstance(model, (KNNModel, RFModel, XTModel, WeightedEnsembleModel)):
+            tic = time.time()
             y_pred_skl = model.model.predict(X)
             print(f"skl elapsed: {(time.time() - tic)*1000.0:.0f} ms")
 
             tic = time.time()
-            # y_pred_onx = model._predict_proba_onnx(X)
             y_pred_onx = model._predict_onnx(X)
             print(f"onx elapsed: {(time.time() - tic)*1000.0:.0f} ms")
 
-        assert_allclose(y_pred_skl, y_pred_onx)
+            assert_allclose(y_pred_skl, y_pred_onx)
+        else:
+            raise NotImplementedError(f"{type(model)} is not supported.")
         
 
     # Otherwise we make predictions and can evaluate them later:
