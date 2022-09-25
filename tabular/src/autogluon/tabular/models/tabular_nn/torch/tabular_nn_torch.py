@@ -435,13 +435,33 @@ class TabularNeuralNetTorchModel(AbstractNeuralNetworkModel):
         preds_dataset = np.concatenate(preds_dataset, 0)
         return preds_dataset
 
-    def _predict_tabular_data_tvm(self, new_data, process=True):
+    # Convert data_batch (Dict[str, List[Tensor]]) into input_data (List[Tensor])
+    def get_input_vector(self, model, data_batch):
+        import torch
+        input_data = []
+        if model.has_vector_features:
+            if isinstance(data_batch['vector'], list):
+                input_data.append(data_batch['vector'][0].to(model.device))
+            else:
+                input_data.append(data_batch['vector'].to(model.device))
+        if model.has_embed_features:
+            embed_data = data_batch['embed']
+            for i in range(len(model.embed_blocks)):
+                input_data.append(model.embed_blocks[i](embed_data[i].
+                                                        to(model.device)))
+        if len(input_data) > 1:
+            with torch.no_grad():
+                input_data = torch.cat(input_data, dim=1)
+        else:
+            input_data = input_data[0]
+        return input_data
+
+    def _tvm_compile(self, new_data, process=True):
         from .tabular_torch_dataset import TabularTorchDataset
         import torch
         import tvm
         from tvm import relay
-        # import pdb
-        # pdb.set_trace()
+        from tvm.contrib import graph_executor
         if process:
             new_data = self._process_test_data(new_data)
         if not isinstance(new_data, TabularTorchDataset):
@@ -465,70 +485,56 @@ class TabularNeuralNetTorchModel(AbstractNeuralNetworkModel):
                 num_features = model.embed_blocks[i].weight.shape[0]
                 input_shape = (self.max_batch_size,)
                 input_shapes.append(input_shape)
-                data_batch['embed'].append(torch.randint(low=0, high=num_features, size=input_shape))
+                data_batch['embed'].append(torch.randint(low=0, high=num_features,
+                                                         size=input_shape))
 
-        # Convert data_batch (Dict[str, List[Tensor]]) into input_data (List[Tensor])
-        def get_input_vector(model, data_batch):
-            input_data = []
-            if model.has_vector_features:
-                if isinstance(data_batch['vector'], list):
-                    input_data.append(data_batch['vector'][0].to(model.device))
-                else:
-                    input_data.append(data_batch['vector'].to(model.device))
-            if model.has_embed_features:
-                embed_data = data_batch['embed']
-                for i in range(len(model.embed_blocks)):
-                    input_data.append(model.embed_blocks[i](embed_data[i].to(model.device)))
-            if len(input_data) > 1:
-                with torch.no_grad():
-                    input_data = torch.cat(input_data, dim=1)
-            else:
-                input_data = input_data[0]
-            return input_data
-        input_data = get_input_vector(model, data_batch)
+        input_data = self.get_input_vector(model, data_batch)
 
         scripted_model = torch.jit.trace(model, input_data).eval()
 
-        # shape_list = [(f"input{i}", s) for i, s in enumerate(input_shapes)]
         shape_list = [("input0", input_data.shape)]
-        # pdb.set_trace()
         mod, params = relay.frontend.from_pytorch(scripted_model, shape_list)
 
         target = tvm.target.Target("llvm", host="llvm")
         dev = tvm.cpu(0)
         with tvm.transform.PassContext(opt_level=3):
             lib = relay.build(mod, target=target, params=params)
+        self._tvm_gmod = graph_executor.GraphModule(lib["default"](dev))
 
-        val_dataloader = new_data.build_loader(self.max_batch_size, self.num_dataloading_workers, is_test=True)
+        return new_data
+
+    def _predict_tabular_data_tvm(self, new_data, process=True):
+        import torch
+        import tvm
+        from tvm import relay
+        from tvm.contrib import graph_executor
+        model = self.model.eval()
+        val_dataloader = new_data.build_loader(self.max_batch_size,
+                                               self.num_dataloading_workers,
+                                               is_test=True)
         preds_dataset = []
         for batch_idx, data_batch in enumerate(val_dataloader):
-
-            # preds_batch = self.model.predict_tvm(data_batch)
-
-            # Convert data_batch (Dict[str, List[Tensor]]) into input_data (List[Tensor])
-            input_data = get_input_vector(model, data_batch)
+            # Convert data_batch (Dict[str, List[Tensor]]) into
+            # input_data (List[Tensor])
+            input_data = self.get_input_vector(model, data_batch)
 
             if input_data.shape[0] < self.max_batch_size:
-                # pdb.set_trace()
                 pad_shape = list(input_data.shape)
                 pad_shape[0] = self.max_batch_size - input_data.shape[0]
                 pad_data = torch.zeros(tuple(pad_shape), dtype=input_data.dtype,
                                        device=input_data.device)
                 input_data = torch.cat([input_data, pad_data], dim=0)
 
-            from tvm.contrib import graph_executor
             dtype = "float32"
-            m = graph_executor.GraphModule(lib["default"](dev))
-            m.set_input("input0", tvm.nd.array(input_data.numpy().astype(dtype)))
-            m.run()
-            tvm_output = m.get_output(0)
+            self._tvm_gmod.set_input("input0", tvm.nd.array(input_data.numpy().astype(dtype)))
+            self._tvm_gmod.run()
+            tvm_output = self._tvm_gmod.get_output(0)
             preds_batch = tvm_output.asnumpy()
             
             preds_dataset.append(preds_batch)
         preds_dataset = np.concatenate(preds_dataset, 0)
         preds_dataset = torch.tensor(preds_dataset)
         preds_dataset = model.predict_tvm(preds_dataset)
-        # pdb.set_trace()
         new_data_shape = new_data.data_list[0].shape
         if preds_dataset.shape[0] != new_data_shape[0]:
             preds_dataset = preds_dataset[:new_data_shape[0]]

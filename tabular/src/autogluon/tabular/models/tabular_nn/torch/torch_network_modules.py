@@ -261,7 +261,6 @@ class EmbedNet(nn.Module):
     def predict_tvm(self, predict_data):
         self.eval()
         with torch.no_grad():
-            # predict_data = self(input_data)
             if self.problem_type == QUANTILE:
                 predict_data = torch.sort(predict_data, -1)[0]  # sorting ensures monotonicity of quantile estimates
             elif self.problem_type in [BINARY, MULTICLASS, SOFTCLASS]:

@@ -19,12 +19,11 @@ def main():
     save_path = 'ag_hpo_models/'  # where to save trained models
 
     hyperparameters = {
-        # 'NN_TORCH': {'num_epochs': 10, 'activation': 'relu', 'dropout_prob': ag.Real(0.0, 0.5)},
+        'NN_TORCH': {'num_epochs': 10, 'activation': 'relu', 'dropout_prob': ag.Real(0.0, 0.5)},
         # 'GBM': {'num_boost_round': 1000, 'learning_rate': ag.Real(0.01, 0.1, log=True)},
         # 'XGB': {'n_estimators': 1000, 'learning_rate': ag.Real(0.01, 0.1, log=True)},
         'RF': {'ag_args': {'name_suffix': 'Gini', 'problem_types': ['binary', 'multiclass']}, 'criterion': 'gini'},
         'KNN': {},
-        'NN_TORCH': {},
         'XT': {},
         # 'GBM': {},
         # 'CAT': {},
@@ -79,6 +78,9 @@ def main():
             y_pred_tch = model._predict_tabular_data(X)
             print(f"tch elapsed: {(time.time() - tic)*1000.0:.0f} ms")
 
+            tic = time.time()
+            X = model._tvm_compile(X)
+            print(f"tvm-compile elapsed: {(time.time() - tic)*1000.0:.0f} ms")
             tic = time.time()
             y_pred_tvm = model._predict_tabular_data_tvm(X)
             print(f"tvm elapsed: {(time.time() - tic)*1000.0:.0f} ms")
