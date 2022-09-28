@@ -79,11 +79,11 @@ def main():
             print(f"tch elapsed: {(time.time() - tic)*1000.0:.0f} ms")
 
             tic = time.time()
-            X = model._tvm_compile(X)
-            print(f"tvm-compile elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+            X = model._tvm_compile(X, enable_tuner=False)
+            compile_time = (time.time() - tic)*1000.0
             tic = time.time()
             y_pred_tvm = model._predict_tabular_data_tvm(X)
-            print(f"tvm elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+            print(f"tvm elapsed: {(time.time() - tic)*1000.0:.0f} ms + {compile_time:.0f} ms (compile + tune)")
 
             assert_allclose(y_pred_tch, y_pred_tvm, rtol=1e-5, atol=1e-5)
         elif isinstance(model, (KNNModel, RFModel, XTModel, WeightedEnsembleModel)):
@@ -94,8 +94,18 @@ def main():
             tic = time.time()
             y_pred_onx = model._predict_onnx(X)
             print(f"onx elapsed: {(time.time() - tic)*1000.0:.0f} ms")
-
             assert_allclose(y_pred_skl, y_pred_onx)
+
+            import pdb
+            pdb.set_trace()
+            tic = time.time()
+            X = model._tvm_compile(X, enable_tuner=False)
+            compile_time = (time.time() - tic)*1000.0
+            tic = time.time()
+            y_pred_tvm = model._predict_tvm(X)
+            print(f"tvm elapsed: {(time.time() - tic)*1000.0:.0f} ms + {compile_time:.0f} ms (compile + tune)")
+            assert_allclose(y_pred_skl, y_pred_tvm)
+
         else:
             raise NotImplementedError(f"{type(model)} is not supported.")
         

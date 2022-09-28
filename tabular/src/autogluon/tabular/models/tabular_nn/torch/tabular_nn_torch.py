@@ -456,12 +456,12 @@ class TabularNeuralNetTorchModel(AbstractNeuralNetworkModel):
             input_data = input_data[0]
         return input_data
 
-    def _tvm_compile(self, new_data, process=True):
+    def _tvm_compile(self, new_data, process=True, enable_tuner=True):
         from .tabular_torch_dataset import TabularTorchDataset
         import torch
         import tvm
-        from tvm import relay
         from tvm.contrib import graph_executor
+        from tvm import relay, auto_scheduler
         if process:
             new_data = self._process_test_data(new_data)
         if not isinstance(new_data, TabularTorchDataset):
@@ -494,13 +494,36 @@ class TabularNeuralNetTorchModel(AbstractNeuralNetworkModel):
 
         shape_list = [("input0", input_data.shape)]
         mod, params = relay.frontend.from_pytorch(scripted_model, shape_list)
-
         target = tvm.target.Target("llvm", host="llvm")
         dev = tvm.cpu(0)
-        with tvm.transform.PassContext(opt_level=3):
-            lib = relay.build(mod, target=target, params=params)
-        self._tvm_gmod = graph_executor.GraphModule(lib["default"](dev))
+        log_file = "log.txt"
 
+        if enable_tuner:
+            # import pdb
+            # pdb.set_trace()
+            tasks, task_weights = auto_scheduler.extract_tasks(mod["main"], params, target)
+            tuner = auto_scheduler.TaskScheduler(tasks, task_weights)
+            tune_option = auto_scheduler.TuningOptions(
+                num_measure_trials=len(tasks)*2,  # change this to 20000 to achieve the best performance
+                runner=auto_scheduler.LocalRunner(repeat=3, enable_cpu_cache_flush=True),
+                measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
+                verbose=0,
+            )
+            tuner.tune(tune_option)
+            with auto_scheduler.ApplyHistoryBest(log_file):
+                with tvm.transform.PassContext(opt_level=3, config={"relay.backend.use_auto_scheduler": True}):
+                    lib = relay.build(mod, target=target, params=params)
+        else:
+            if os.path.exists(log_file):
+                with auto_scheduler.ApplyHistoryBest(log_file):
+                    with tvm.transform.PassContext(opt_level=3, config={"relay.backend.use_auto_scheduler": True}):
+                        lib = relay.build(mod, target=target, params=params)
+            else:
+                with tvm.transform.PassContext(opt_level=3):
+                    lib = relay.build(mod, target=target, params=params)
+
+        # Build GraphModule
+        self._tvm_gmod = graph_executor.GraphModule(lib["default"](dev))
         return new_data
 
     def _predict_tabular_data_tvm(self, new_data, process=True):

@@ -120,15 +120,22 @@ class KNNModel(AbstractModel):
             if model_memory_ratio > (0.20 * max_memory_usage_ratio):
                 raise NotEnoughMemoryError  # don't train full model to avoid OOM error
 
-    def compile(self):
+    def compile(self, backend="onnx"):
+        self._backend = backend
+        if backend == "onnx":
+            self._onnx_compile()
+        else:
+            self._tvm_compile()
+
+    def _onnx_compile(self):
         path = self.path
         print('compiling')
-        # Convert into ONNX format
+        import os
         from skl2onnx import convert_sklearn
         from skl2onnx.common.data_types import FloatTensorType
+
+        # Convert into ONNX format
         initial_type = [('float_input', FloatTensorType([None, self._num_features_post_process]))]
-        # import pdb
-        # pdb.set_trace()
         onx = convert_sklearn(self.model, initial_types=initial_type)
 
         ########################################################
@@ -137,8 +144,6 @@ class KNNModel(AbstractModel):
             onx.graph.initializer[0].data_type = 6
         ########################################################
 
-        # onx = self.model.model
-        import os
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path + "model.onnx", "wb") as f:
             f.write(onx.SerializeToString())
@@ -147,11 +152,7 @@ class KNNModel(AbstractModel):
 
         # Compute the prediction with ONNX Runtime
         import onnxruntime as rt
-        # import numpy as np
         self._model_onnx = rt.InferenceSession(onx.SerializeToString())
-        # input_name = sess.get_inputs()[0].name
-        # label_name = sess.get_outputs()[0].name
-        # pred_onx = sess.run([label_name], {input_name: X_test.astype(numpy.float32)})[0]
 
     def _load_onnx(self, path: str):
         import onnxruntime as rt
@@ -169,6 +170,18 @@ class KNNModel(AbstractModel):
         pred_proba = self._model_onnx.run([label_name], {input_name: X})[0]
         pred_proba = np.array([[r[i] for i in range(self.num_classes)] for r in pred_proba])
         return pred_proba
+
+    def _tvm_compile(self, X, enable_tuner=True):
+        import pdb
+        pdb.set_trace()
+        from hummingbird.ml import convert as hb_convert
+        pt_model = hb_convert(self.model, 'pytorch', extra_config={"batch_size": 512})
+        pt_model.save(self.path + "model.pt")
+
+    def _predict_tvm(self, X):
+        input_name = self._model_onnx.get_inputs()[0].name
+        label_name = self._model_onnx.get_outputs()[0].name
+        return self._model_onnx.run([label_name], {input_name: X})[0]
 
     # TODO: Won't work for RAPIDS without modification
     # TODO: Technically isn't OOF, but can be used inplace of OOF. Perhaps rename to something more accurate?
