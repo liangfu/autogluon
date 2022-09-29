@@ -19,23 +19,21 @@ def main():
     save_path = 'ag_hpo_models/'  # where to save trained models
 
     hyperparameters = {
-        'NN_TORCH': {'num_epochs': 10, 'activation': 'relu', 'dropout_prob': ag.Real(0.0, 0.5)},
-        # 'GBM': {'num_boost_round': 1000, 'learning_rate': ag.Real(0.01, 0.1, log=True)},
-        # 'XGB': {'n_estimators': 1000, 'learning_rate': ag.Real(0.01, 0.1, log=True)},
-        'RF': {'ag_args': {'name_suffix': 'Gini', 'problem_types': ['binary', 'multiclass']}, 'criterion': 'gini'},
-        'KNN': {},
-        'XT': {},
-        # 'GBM': {},
+        # 'NN_TORCH': {'ag_args_fit': {'compiler': 'tvm'}},
+        'RF': {'ag_args_fit': {'compiler': 'onnx'}},
+        'KNN': {'ag_args_fit': {'compiler': 'onnx'}},
+        'XT': {'ag_args_fit': {'compiler': 'onnx'}},
+        'GBM': {'ag_args_fit': {'compiler': 'native'}},
+        'XGB': {'ag_args_fit': {'compiler': 'native'}},
         # 'CAT': {},
-        # 'XGB': {},
     }
     # hyperparameters.update(get_hyperparameter_config('default'))
     print('\n'.join(list(get_hyperparameter_config('default').keys())))
 
-    # predictor = TabularPredictor(label=label, path=save_path).fit(
-    #     train_data, hyperparameters=hyperparameters, hyperparameter_tune_kwargs='auto', time_limit=60
-    # )
-    # predictor.save()
+    predictor = TabularPredictor(label=label, path=save_path).fit(
+        train_data, hyperparameters=hyperparameters, hyperparameter_tune_kwargs='auto', time_limit=60
+    )
+    predictor.save()
     predictor = TabularPredictor.load(path=save_path)
 
     results = predictor.fit_summary()  # display detailed summary of fit() process
@@ -62,6 +60,8 @@ def main():
         from autogluon.tabular.models.knn.knn_model import KNNModel
         from autogluon.tabular.models.rf.rf_model import RFModel
         from autogluon.tabular.models.xt.xt_model import XTModel
+        from autogluon.tabular.models.lgb.lgb_model import LGBModel
+        from autogluon.tabular.models.xgboost.xgboost_model import XGBoostModel
         if isinstance(model, WeightedEnsembleModel):
             base_name = model.base_model_names[0]
             model = trainer.load_model(base_name)
@@ -86,7 +86,7 @@ def main():
             print(f"tvm elapsed: {(time.time() - tic)*1000.0:.0f} ms + {compile_time:.0f} ms (compile + tune)")
 
             assert_allclose(y_pred_tch, y_pred_tvm, rtol=1e-5, atol=1e-5)
-        elif isinstance(model, (KNNModel, RFModel, XTModel, WeightedEnsembleModel)):
+        elif isinstance(model, (KNNModel,)):
             tic = time.time()
             y_pred_skl = model.model.predict(X)
             print(f"skl elapsed: {(time.time() - tic)*1000.0:.0f} ms")
@@ -96,15 +96,35 @@ def main():
             print(f"onx elapsed: {(time.time() - tic)*1000.0:.0f} ms")
             assert_allclose(y_pred_skl, y_pred_onx)
 
-            import pdb
-            pdb.set_trace()
+        elif isinstance(model, (RFModel, XTModel, WeightedEnsembleModel)):
             tic = time.time()
-            X = model._tvm_compile(X, enable_tuner=False)
-            compile_time = (time.time() - tic)*1000.0
+            y_pred_skl = model.model.predict(X)
+            print(f"skl elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+
             tic = time.time()
-            y_pred_tvm = model._predict_tvm(X)
-            print(f"tvm elapsed: {(time.time() - tic)*1000.0:.0f} ms + {compile_time:.0f} ms (compile + tune)")
-            assert_allclose(y_pred_skl, y_pred_tvm)
+            y_pred_onx = model._predict_onnx(X)
+            print(f"onx elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+            assert_allclose(y_pred_skl, y_pred_onx)
+
+            # import pdb
+            # pdb.set_trace()
+            # tic = time.time()
+            # X = model._tvm_compile(X, enable_tuner=False)
+            # compile_time = (time.time() - tic)*1000.0
+            # tic = time.time()
+            # y_pred_tvm = model._predict_tvm(X)
+            # print(f"tvm elapsed: {(time.time() - tic)*1000.0:.0f} ms + {compile_time:.0f} ms (compile + tune)")
+            # assert_allclose(y_pred_skl, y_pred_tvm)
+
+        elif isinstance(model, (LGBModel, XGBoostModel)):
+            tic = time.time()
+            y_pred_skl = model.model.predict(X)
+            print(f"native elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+
+            # tic = time.time()
+            # y_pred_onx = model._predict_onnx(X)
+            # print(f"lleaves elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+            # assert_allclose(y_pred_skl, y_pred_onx)
 
         else:
             raise NotImplementedError(f"{type(model)} is not supported.")

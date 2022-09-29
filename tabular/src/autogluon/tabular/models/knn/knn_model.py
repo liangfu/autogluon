@@ -175,8 +175,11 @@ class KNNModel(AbstractModel):
         import pdb
         pdb.set_trace()
         from hummingbird.ml import convert as hb_convert
-        pt_model = hb_convert(self.model, 'pytorch', extra_config={"batch_size": 512})
-        pt_model.save(self.path + "model.pt")
+        input_shape = list(X.shape)
+        input_shape[0] = 512
+        self._model_tvm = hb_convert(self.model, 'tvm', extra_config={
+            "batch_size": 512, "test_input": [np.random.rand(*input_shape)]})
+        self._model_tvm.save(self.path + "model_tvm")
 
     def _predict_tvm(self, X):
         input_name = self._model_onnx.get_inputs()[0].name

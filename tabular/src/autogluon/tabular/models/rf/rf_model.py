@@ -300,29 +300,29 @@ class RFModel(AbstractModel):
         self.params_trained['n_estimators'] = self.model.n_estimators
         # self.compile(path=self.path)
 
-    def compile(self):
+    def compile(self, backend="onnx"):
+        if backend == "onnx":
+            self._onnx_compile()
+        else:
+            self._tvm_compile()
+
+    def _onnx_compile(self):
         path = self.path
         print('compiling')
         # Convert into ONNX format
         from skl2onnx import convert_sklearn
         from skl2onnx.common.data_types import FloatTensorType
-        initial_type = [('float_input', FloatTensorType([None, self._num_features_post_process]))]
-        # import pdb
-        # pdb.set_trace()
-        # onx = convert_sklearn(self.model, initial_types=initial_type)
-        onx = self.model.model
+        import onnxruntime as rt
         import os
+        import numpy
+        initial_type = [('float_input', FloatTensorType([None, self._num_features_post_process]))]
+        onx = self.model.model
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path + "model.onnx", "wb") as f:
             f.write(onx.SerializeToString())
 
         # Compute the prediction with ONNX Runtime
-        import onnxruntime as rt
-        import numpy
         self._model_onnx = rt.InferenceSession(path + "model.onnx")
-        # input_name = sess.get_inputs()[0].name
-        # label_name = sess.get_outputs()[0].name
-        # pred_onx = sess.run([label_name], {input_name: X_test.astype(numpy.float32)})[0]
 
     def _load_onnx(self, path: str):
         import onnxruntime as rt
@@ -340,6 +340,21 @@ class RFModel(AbstractModel):
         pred_proba = self._model_onnx.run([label_name], {input_name: X})[0]
         pred_proba = np.array([[r[i] for i in range(self.num_classes)] for r in pred_proba])
         return pred_proba
+
+    def _tvm_compile(self, X, enable_tuner=True):
+        import pdb
+        pdb.set_trace()
+        from hummingbird.ml import convert as hb_convert
+        input_shape = list(X.shape)
+        input_shape[0] = 512
+        self._model_tvm = hb_convert(self.model, 'tvm', extra_config={
+            "batch_size": 512, "test_input": [np.random.rand(*input_shape)]})
+        self._model_tvm.save(self.path + "model_tvm")
+
+    def _predict_tvm(self, X):
+        input_name = self._model_onnx.get_inputs()[0].name
+        label_name = self._model_onnx.get_outputs()[0].name
+        return self._model_onnx.run([label_name], {input_name: X})[0]
 
     # TODO: Remove this after simplifying _predict_proba to reduce code duplication. This is only present for SOFTCLASS support.
     def _predict_proba(self, X, **kwargs):
