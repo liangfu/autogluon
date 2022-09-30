@@ -124,6 +124,16 @@ def benchmark(hyperparameters):
             print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
             assert_allclose(y_pred_lgb, y_pred_lleaves)
 
+            model.params_aux['compiler'] = "pytorch"
+            model.compile()
+            tic = time.time()
+            y_pred_tvm = model.model.predict(X)
+            print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+            tic = time.time()
+            y_pred_tvm = model.model.predict(X)
+            print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+            # assert_allclose(y_pred_lgb, y_pred_tvm)
+
             model.params_aux['compiler'] = "tvm"
             model.compile()
             tic = time.time()

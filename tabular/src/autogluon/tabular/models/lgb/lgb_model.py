@@ -15,7 +15,7 @@ from autogluon.common.utils.pandas_utils import get_approximate_df_mem_usage
 from autogluon.core.constants import BINARY, MULTICLASS, REGRESSION, SOFTCLASS
 from autogluon.core.models import AbstractModel
 from autogluon.core.models._utils import get_early_stopping_rounds
-from autogluon.core.utils import try_import_lightgbm, try_import_lleaves, try_import_tvm
+from autogluon.core.utils import try_import_lightgbm, try_import_lleaves, try_import_torch, try_import_tvm
 
 from . import lgb_utils
 from .hyperparameters.parameters import get_param_baseline, get_lgb_objective, DEFAULT_NUM_BOOST_ROUND
@@ -34,6 +34,30 @@ class LGBLLeavesPredictor:
         return self.model.predict(X, **kwargs)
 
 
+class LGBPyTorchPredictor:
+    def __init__(self, model):
+        self.model = model
+
+    def predict(self, X, **kwargs):
+        y_pred = []
+        batch_size = self.model._batch_size
+        # batching via groupby
+        for batch_id, batch_df in X.groupby(np.arange(len(X)) // batch_size):
+            batch_df = batch_df.to_numpy()
+            if batch_df.shape[0] != batch_size:
+                # padding
+                pad_shape = list(batch_df.shape)
+                pad_shape[0] = batch_size - batch_df.shape[0]
+                X_pad = np.zeros(tuple(pad_shape))
+                batch_df = np.concatenate([batch_df, X_pad])
+            y_pred.append(self.model.predict(batch_df.astype(np.float32), **kwargs))
+        y_pred = np.concatenate(y_pred)
+        # remove padding
+        if y_pred.shape[0] != X.shape[0]:
+           y_pred = y_pred[:X.shape[0]]
+        return y_pred
+
+
 class LGBTVMPredictor:
     def __init__(self, model):
         self.model = model
@@ -43,13 +67,14 @@ class LGBTVMPredictor:
         batch_size = self.model._batch_size
         # batching via groupby
         for batch_id, batch_df in X.groupby(np.arange(len(X)) // batch_size):
+            batch_df = batch_df.to_numpy()
             if batch_df.shape[0] != batch_size:
                 # padding
                 pad_shape = list(batch_df.shape)
                 pad_shape[0] = batch_size - batch_df.shape[0]
                 X_pad = np.zeros(tuple(pad_shape))
-                batch_df = np.concatenate([batch_df.to_numpy(), X_pad])
-            y_pred.append(self.model.predict(batch_df, **kwargs))
+                batch_df = np.concatenate([batch_df, X_pad])
+            y_pred.append(self.model.predict(batch_df.astype(np.float64), **kwargs))
         y_pred = np.concatenate(y_pred)
         # remove padding
         if y_pred.shape[0] != X.shape[0]:
@@ -106,6 +131,36 @@ class LGBModelLLeavesCompiler:
         llvm_model = lleaves.Model(model_file=path + 'model.txt')
         llvm_model.compile(cache=path + 'lleaves.o')
         model = LGBLLeavesPredictor(model=llvm_model)
+        return model
+
+
+class LGBModelPyTorchCompiler:
+    name = 'pytorch'
+    save_in_pkl = False
+
+    @staticmethod
+    def can_compile():
+        try:
+            try_import_torch()
+            return True
+        except ImportError:
+            return False
+
+    @staticmethod
+    def compile(obj, path: str):
+        LGBNativeCompiler.compile(obj=obj, path=path)
+        return LGBModelPyTorchCompiler.load(obj=obj, path=path)
+
+    @staticmethod
+    def load(obj, path: str):
+        model = LGBNativeCompiler.load(obj, path)
+        from hummingbird.ml import convert as hb_convert
+        batch_size = 5120
+        input_shape = (batch_size, model.num_feature())
+        pt_model = hb_convert(model, 'pytorch', extra_config={
+            "batch_size": batch_size, "test_input": np.random.rand(*input_shape)})
+        pt_model.save(path + "model_pt")
+        model = LGBPyTorchPredictor(model=pt_model)
         return model
 
 
@@ -454,7 +509,7 @@ class LGBModel(AbstractModel):
         return self._features_internal_list
 
     def _valid_compilers(self):
-        return [LGBNativeCompiler, LGBModelLLeavesCompiler, LGBModelTVMCompiler]
+        return [LGBNativeCompiler, LGBModelLLeavesCompiler, LGBModelPyTorchCompiler, LGBModelTVMCompiler]
 
     def _get_compiler(self):
         compiler = self.params_aux.get('compiler', None)
