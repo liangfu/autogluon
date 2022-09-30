@@ -9,7 +9,7 @@ from autogluon.tabular.configs.hyperparameter_configs import get_hyperparameter_
 import time
 from numpy.testing import assert_allclose
 
-def main():
+def benchmark(hyperparameters):
 
     # Training time:
     train_data = TabularDataset('https://autogluon.s3.amazonaws.com/datasets/Inc/train.csv')  # can be local CSV file as well, returns Pandas DataFrame
@@ -18,22 +18,13 @@ def main():
     label = 'class'  # specifies which column do we want to predict
     save_path = 'ag_hpo_models/'  # where to save trained models
 
-    hyperparameters = {
-        # 'NN_TORCH': {'ag_args_fit': {'compiler': 'tvm'}},
-        'RF': {'ag_args_fit': {'compiler': 'onnx'}},
-        'KNN': {'ag_args_fit': {'compiler': 'onnx'}},
-        'XT': {'ag_args_fit': {'compiler': 'onnx'}},
-        'GBM': {'ag_args_fit': {'compiler': 'native'}},
-        'XGB': {'ag_args_fit': {'compiler': 'native'}},
-        # 'CAT': {},
-    }
     # hyperparameters.update(get_hyperparameter_config('default'))
     print('\n'.join(list(get_hyperparameter_config('default').keys())))
 
-    predictor = TabularPredictor(label=label, path=save_path).fit(
-        train_data, hyperparameters=hyperparameters, hyperparameter_tune_kwargs='auto', time_limit=60
-    )
-    predictor.save()
+    # predictor = TabularPredictor(label=label, path=save_path).fit(
+    #     train_data, hyperparameters=hyperparameters, hyperparameter_tune_kwargs='auto', time_limit=60
+    # )
+    # predictor.save()
     predictor = TabularPredictor.load(path=save_path)
 
     results = predictor.fit_summary()  # display detailed summary of fit() process
@@ -116,15 +107,39 @@ def main():
             # print(f"tvm elapsed: {(time.time() - tic)*1000.0:.0f} ms + {compile_time:.0f} ms (compile + tune)")
             # assert_allclose(y_pred_skl, y_pred_tvm)
 
-        elif isinstance(model, (LGBModel, XGBoostModel)):
+        elif isinstance(model, (LGBModel)):
+            model.params_aux['compiler'] = "native"
+            model.compile()
             tic = time.time()
-            y_pred_skl = model.model.predict(X)
-            print(f"native elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+            y_pred_lgb = model.model.predict(X)
+            print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
 
-            # tic = time.time()
-            # y_pred_onx = model._predict_onnx(X)
-            # print(f"lleaves elapsed: {(time.time() - tic)*1000.0:.0f} ms")
-            # assert_allclose(y_pred_skl, y_pred_onx)
+            model.params_aux['compiler'] = "lleaves"
+            model.compile()
+            tic = time.time()
+            y_pred_lleaves = model.model.predict(X)
+            print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+            tic = time.time()
+            y_pred_lleaves = model.model.predict(X)
+            print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+            assert_allclose(y_pred_lgb, y_pred_lleaves)
+
+            model.params_aux['compiler'] = "tvm"
+            model.compile()
+            tic = time.time()
+            y_pred_tvm = model.model.predict(X)
+            print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+            tic = time.time()
+            y_pred_tvm = model.model.predict(X)
+            print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+            # assert_allclose(y_pred_lgb, y_pred_tvm)
+
+        elif isinstance(model, (XGBoostModel)):
+            model.params_aux['compiler'] = "native"
+            model.compile()
+            tic = time.time()
+            y_pred_native = model.model.predict(X)
+            print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
 
         else:
             raise NotImplementedError(f"{type(model)} is not supported.")
@@ -135,4 +150,24 @@ def main():
     perf = predictor.evaluate_predictions(y_true=test_data[label], y_pred=y_pred, auxiliary_metrics=True)
 
 if __name__=="__main__":
-    main()
+    hyperparameters = {
+        # 'NN_TORCH': {'ag_args_fit': {'compiler': 'tvm'}},
+        'RF': {'ag_args_fit': {'compiler': 'onnx'}},
+        'KNN': {'ag_args_fit': {'compiler': 'onnx'}},
+        'XT': {'ag_args_fit': {'compiler': 'onnx'}},
+        'GBM': {'ag_args_fit': {'compiler': 'native'}},
+        # 'XGB': {'ag_args_fit': {'compiler': 'native'}},
+        # 'CAT': {},
+    }
+    # benchmark(hyperparameters)
+
+    hyperparameters = {
+        # 'NN_TORCH': {'ag_args_fit': {'compiler': 'tvm'}},
+        # 'RF': {'ag_args_fit': {'compiler': 'onnx'}},
+        # 'KNN': {'ag_args_fit': {'compiler': 'onnx'}},
+        # 'XT': {'ag_args_fit': {'compiler': 'onnx'}},
+        'GBM': {'ag_args_fit': {'compiler': 'native'}},
+        # 'XGB': {'ag_args_fit': {'compiler': 'tvm'}},
+        # 'CAT': {},
+    }
+    benchmark(hyperparameters)

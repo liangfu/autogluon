@@ -178,7 +178,7 @@ class KNNModel(AbstractModel):
         input_shape = list(X.shape)
         input_shape[0] = 512
         self._model_tvm = hb_convert(self.model, 'tvm', extra_config={
-            "batch_size": 512, "test_input": [np.random.rand(*input_shape)]})
+            "batch_size": 512, "test_input": (np.random.rand(*input_shape),)})
         self._model_tvm.save(self.path + "model_tvm")
 
     def _predict_tvm(self, X):

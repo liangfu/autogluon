@@ -15,6 +15,7 @@ __all__ = [
     'try_import_faiss',
     'try_import_fastai',
     'try_import_torch',
+    'try_import_tvm',
     'try_import_d8',
     'try_import_autogluon_text',
     'try_import_autogluon_vision',
@@ -211,6 +212,14 @@ def try_import_torch():
         raise ImportError("Unable to import dependency torch\n"
                           "A quick tip is to install via `pip install torch`.\n"
                           "The minimum torch version is currently 1.6.")
+
+
+def try_import_tvm():
+    try:
+        import tvm
+    except ImportError as e:
+        raise ImportError("Unable to import dependency tvm\n"
+                          "A quick tip is to install via `pip install apache-tvm`.\n")
 
 
 def try_import_d8():
