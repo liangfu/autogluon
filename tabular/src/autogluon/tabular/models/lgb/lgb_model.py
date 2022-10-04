@@ -74,7 +74,7 @@ class LGBTVMPredictor:
                 pad_shape[0] = batch_size - batch_df.shape[0]
                 X_pad = np.zeros(tuple(pad_shape))
                 batch_df = np.concatenate([batch_df, X_pad])
-            y_pred.append(self.model.predict(batch_df.astype(np.float64), **kwargs))
+            y_pred.append(self.model.predict(batch_df.astype(np.float64)))
         y_pred = np.concatenate(y_pred)
         # remove padding
         if y_pred.shape[0] != X.shape[0]:

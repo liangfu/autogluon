@@ -8,6 +8,9 @@ from autogluon.tabular import TabularDataset, TabularPredictor
 from autogluon.tabular.configs.hyperparameter_configs import get_hyperparameter_config
 import time
 from numpy.testing import assert_allclose
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 def benchmark(hyperparameters):
 
@@ -21,10 +24,11 @@ def benchmark(hyperparameters):
     # hyperparameters.update(get_hyperparameter_config('default'))
     print('\n'.join(list(get_hyperparameter_config('default').keys())))
 
-    # predictor = TabularPredictor(label=label, path=save_path).fit(
-    #     train_data, hyperparameters=hyperparameters, hyperparameter_tune_kwargs='auto', time_limit=60
-    # )
-    # predictor.save()
+    predictor = TabularPredictor(label=label, path=save_path).fit(
+        train_data, hyperparameters=hyperparameters, time_limit=60
+        # hyperparameter_tune_kwargs='auto'
+    )
+    predictor.save()
     predictor = TabularPredictor.load(path=save_path)
 
     results = predictor.fit_summary()  # display detailed summary of fit() process
@@ -88,24 +92,40 @@ def benchmark(hyperparameters):
             assert_allclose(y_pred_skl, y_pred_onx)
 
         elif isinstance(model, (RFModel, XTModel, WeightedEnsembleModel)):
-            tic = time.time()
-            y_pred_skl = model.model.predict(X)
-            print(f"skl elapsed: {(time.time() - tic)*1000.0:.0f} ms")
-
-            tic = time.time()
-            y_pred_onx = model._predict_onnx(X)
-            print(f"onx elapsed: {(time.time() - tic)*1000.0:.0f} ms")
-            assert_allclose(y_pred_skl, y_pred_onx)
-
-            # import pdb
-            # pdb.set_trace()
             # tic = time.time()
-            # X = model._tvm_compile(X, enable_tuner=False)
-            # compile_time = (time.time() - tic)*1000.0
+            # y_pred_skl = model.model.predict(X)
+            # print(f"skl elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+
             # tic = time.time()
-            # y_pred_tvm = model._predict_tvm(X)
-            # print(f"tvm elapsed: {(time.time() - tic)*1000.0:.0f} ms + {compile_time:.0f} ms (compile + tune)")
-            # assert_allclose(y_pred_skl, y_pred_tvm)
+            # y_pred_onx = model._predict_onnx(X)
+            # print(f"onx elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+            # assert_allclose(y_pred_skl, y_pred_onx)
+
+            model.params_aux['compiler'] = "native"
+            model.compile()
+            tic = time.time()
+            y_pred_skl = model.model.predict_proba(X)
+            print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+
+            model.params_aux['compiler'] = "onnx"
+            model.compile()
+            tic = time.time()
+            y_pred_tvm = model.model.predict_proba(X)
+            print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+            tic = time.time()
+            y_pred_tvm = model.model.predict_proba(X)
+            print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+            assert_allclose(y_pred_skl, y_pred_tvm, rtol=1e-5, atol=1e-5)
+
+            model.params_aux['compiler'] = "tvm"
+            model.compile()
+            tic = time.time()
+            y_pred_tvm = model.model.predict_proba(X)
+            print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+            tic = time.time()
+            y_pred_tvm = model.model.predict_proba(X)
+            print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+            # assert_allclose(y_pred_skl, y_pred_tvm, rtol=1e-5, atol=1e-5)
 
         elif isinstance(model, (LGBModel)):
             model.params_aux['compiler'] = "native"
@@ -173,6 +193,17 @@ if __name__=="__main__":
 
     hyperparameters = {
         # 'NN_TORCH': {'ag_args_fit': {'compiler': 'tvm'}},
+        # 'RF': {'ag_args_fit': {'compiler': 'native'}},
+        # 'KNN': {'ag_args_fit': {'compiler': 'onnx'}},
+        'XT': {'ag_args_fit': {'compiler': 'native'}},
+        # 'GBM': {'ag_args_fit': {'compiler': 'native'}},
+        # 'XGB': {'ag_args_fit': {'compiler': 'tvm'}},
+        # 'CAT': {},
+    }
+    benchmark(hyperparameters)
+
+    hyperparameters = {
+        # 'NN_TORCH': {'ag_args_fit': {'compiler': 'tvm'}},
         # 'RF': {'ag_args_fit': {'compiler': 'onnx'}},
         # 'KNN': {'ag_args_fit': {'compiler': 'onnx'}},
         # 'XT': {'ag_args_fit': {'compiler': 'onnx'}},
@@ -180,4 +211,4 @@ if __name__=="__main__":
         # 'XGB': {'ag_args_fit': {'compiler': 'tvm'}},
         # 'CAT': {},
     }
-    benchmark(hyperparameters)
+    # benchmark(hyperparameters)

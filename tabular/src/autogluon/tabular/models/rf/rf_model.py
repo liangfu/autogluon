@@ -11,6 +11,7 @@ from autogluon.common.features.types import R_BOOL, R_INT, R_FLOAT, R_CATEGORY
 from autogluon.core.constants import MULTICLASS, REGRESSION, SOFTCLASS, QUANTILE
 from autogluon.core.utils.exceptions import NotEnoughMemoryError, TimeLimitExceeded
 from autogluon.core.utils.utils import normalize_pred_probas
+from autogluon.core.utils import try_import_torch, try_import_tvm
 
 from autogluon.core.models import AbstractModel
 from autogluon.features.generators import LabelEncoderFeatureGenerator
@@ -24,7 +25,7 @@ class RFOnnxPredictor:
         import onnxruntime as rt
         self.num_classes = obj.num_classes
         self.model = model
-        self._sess = rt.InferenceSession(path + "model.onnx")
+        self._sess = rt.InferenceSession(model.SerializeToString())
 
     def predict(self, X):
         input_name = self._sess.get_inputs()[0].name
@@ -37,6 +38,79 @@ class RFOnnxPredictor:
         pred_proba = self._sess.run([label_name], {input_name: X})[0]
         pred_proba = np.array([[r[i] for i in range(self.num_classes)] for r in pred_proba])
         return pred_proba
+
+
+class RFTVMPredictor:
+    def __init__(self, model):
+        self.model = model
+
+    def predict(self, X, **kwargs):
+        y_pred = []
+        batch_size = self.model._batch_size
+        # batching via groupby
+        for batch_id, batch_np in enumerate(np.split(X, np.arange(0, len(X), batch_size))):
+            if batch_np.shape[0] != batch_size:
+                # padding
+                pad_shape = list(batch_np.shape)
+                pad_shape[0] = batch_size - batch_np.shape[0]
+                X_pad = np.zeros(tuple(pad_shape))
+                batch_np = np.concatenate([batch_np, X_pad])
+            y_pred.append(self.model.predict(batch_np.astype(np.float64)))
+        y_pred = np.concatenate(y_pred)
+        # remove padding
+        if y_pred.shape[0] != X.shape[0]:
+           y_pred = y_pred[:X.shape[0]]
+        return y_pred
+
+    def predict_proba(self, X, **kwargs):
+        y_pred = []
+        batch_size = self.model._batch_size
+        # batching via groupby
+        for batch_id, batch_np in enumerate(np.split(X, np.arange(0, len(X), batch_size))):
+            if batch_np.shape[0] != batch_size:
+                # padding
+                pad_shape = list(batch_np.shape)
+                pad_shape[0] = batch_size - batch_np.shape[0]
+                X_pad = np.zeros(tuple(pad_shape))
+                batch_np = np.concatenate([batch_np, X_pad])
+            y_pred.append(self.model.predict_proba(batch_np.astype(np.float64)))
+        y_pred = np.concatenate(y_pred)
+        # remove padding
+        if y_pred.shape[0] != X.shape[0]:
+           y_pred = y_pred[:X.shape[0]]
+        return y_pred
+
+
+class RFNativeCompiler:
+    name = 'native'
+    save_in_pkl = True
+
+    @staticmethod
+    def can_compile():
+        return True
+
+    @staticmethod
+    def compile(obj, path: str):
+        from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+        from sklearn.ensemble import ExtraTreesRegressor, ExtraTreesClassifier
+        if isinstance(obj.model, (RandomForestClassifier, RandomForestRegressor,
+                                  ExtraTreesClassifier, ExtraTreesRegressor)):
+            with open(path + 'model_native.pkl', 'wb') as fp:
+                fp.write(pickle.dumps(obj))
+        else:
+            pkl = None
+            with open(path + 'model_native.pkl', 'rb') as fp:
+                pkl = fp.read()
+            return pickle.loads(pkl).model
+        return obj.model
+
+    @staticmethod
+    def load(obj, path: str):
+        pkl = None
+        with open(path + 'model_native.pkl', 'rb') as fp:
+            pkl = fp.read()
+        model = pickle.loads(pkl)
+        return model.model
 
 
 class RFOnnxCompiler:
@@ -53,41 +127,52 @@ class RFOnnxCompiler:
 
     @staticmethod
     def compile(obj, path: str):
-        print('compiling')
-        # Convert into ONNX format
-        from skl2onnx import convert_sklearn
-        from skl2onnx.common.data_types import FloatTensorType
-        initial_type = [('float_input', FloatTensorType([None, obj._num_features_post_process]))]
-        # import pdb
-        # pdb.set_trace()
-        onx = convert_sklearn(obj.model, initial_types=initial_type)
-        import os
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path + "model.onnx", "wb") as f:
-            f.write(onx.SerializeToString())
+        # RFNativeCompiler.compile(obj=obj, path=path)
         return RFOnnxCompiler.load(obj=obj, path=path)
 
     @staticmethod
     def load(obj, path: str):
-        # import onnxruntime as rt
-        # model = rt.InferenceSession(path + "model.onnx")
-        import onnx
-        model = onnx.load(path + "model.onnx")
-        return RFOnnxPredictor(obj=obj, model=model, path=path)
+        model = RFNativeCompiler.load(obj, path)
+        from skl2onnx import convert_sklearn
+        from skl2onnx.common.data_types import FloatTensorType
+        initial_type = [('float_input', FloatTensorType([None, obj._num_features_post_process]))]
+        onnx_model = convert_sklearn(model, initial_types=initial_type)
+        return RFOnnxPredictor(obj=obj, model=onnx_model, path=path)
 
-    # @staticmethod
-    # def predict(obj, X):
-    #     input_name = obj._model_onnx.get_inputs()[0].name
-    #     label_name = obj._model_onnx.get_outputs()[0].name
-    #     return obj._model_onnx.run([label_name], {input_name: X})[0]
-    #
-    # @staticmethod
-    # def predict_proba(obj, X):
-    #     input_name = obj._model_onnx.get_inputs()[0].name
-    #     label_name = obj._model_onnx.get_outputs()[1].name
-    #     pred_proba = obj._model_onnx.run([label_name], {input_name: X})[0]
-    #     pred_proba = np.array([[r[i] for i in range(obj.num_classes)] for r in pred_proba])
-    #     return pred_proba
+
+class RFTVMCompiler:
+    name = 'tvm'
+    save_in_pkl = False
+
+    @staticmethod
+    def can_compile():
+        try:
+            try_import_tvm()
+            return True
+        except ImportError:
+            return False
+
+    @staticmethod
+    def compile(obj, path: str):
+        RFNativeCompiler.compile(obj=obj, path=path)
+        return RFTVMCompiler.load(obj=obj, path=path)
+
+    @staticmethod
+    def load(obj, path: str):
+        model = RFNativeCompiler.load(obj, path)
+        from hummingbird.ml import convert as hb_convert
+        import os
+        batch_size = 5120
+        input_shape = (batch_size, obj._num_features_post_process)
+        if os.path.exists(path + "model_tvm.zip"):
+            from hummingbird.ml import load as hb_load
+            tvm_model = hb_load(path + "model_tvm")
+        else:
+            tvm_model = hb_convert(model, 'tvm', extra_config={
+                "batch_size": batch_size, "test_input": np.random.rand(*input_shape)})
+            tvm_model.save(path + "model_tvm")
+        model = RFTVMPredictor(model=tvm_model)
+        return model
 
 
 class RFModel(AbstractModel):
@@ -300,61 +385,46 @@ class RFModel(AbstractModel):
         self.params_trained['n_estimators'] = self.model.n_estimators
         # self.compile(path=self.path)
 
-    def compile(self, backend="onnx"):
-        if backend == "onnx":
-            self._onnx_compile()
-        else:
-            self._tvm_compile()
+    # def compile(self, backend="onnx"):
+    #     if backend == "onnx":
+    #         self._onnx_compile()
+    #     else:
+    #         self._tvm_compile()
 
-    def _onnx_compile(self):
-        path = self.path
-        print('compiling')
-        # Convert into ONNX format
-        from skl2onnx import convert_sklearn
-        from skl2onnx.common.data_types import FloatTensorType
-        import onnxruntime as rt
-        import os
-        import numpy
-        initial_type = [('float_input', FloatTensorType([None, self._num_features_post_process]))]
-        onx = self.model.model
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path + "model.onnx", "wb") as f:
-            f.write(onx.SerializeToString())
+    # def _onnx_compile(self):
+    #     path = self.path
+    #     print('compiling')
+    #     # Convert into ONNX format
+    #     from skl2onnx import convert_sklearn
+    #     from skl2onnx.common.data_types import FloatTensorType
+    #     import onnxruntime as rt
+    #     import os
+    #     import numpy
+    #     initial_type = [('float_input', FloatTensorType([None, self._num_features_post_process]))]
+    #     onx = self.model.model
+    #     os.makedirs(os.path.dirname(path), exist_ok=True)
+    #     with open(path + "model.onnx", "wb") as f:
+    #         f.write(onx.SerializeToString())
 
-        # Compute the prediction with ONNX Runtime
-        self._model_onnx = rt.InferenceSession(path + "model.onnx")
+    #     # Compute the prediction with ONNX Runtime
+    #     self._model_onnx = rt.InferenceSession(path + "model.onnx")
 
-    def _load_onnx(self, path: str):
-        import onnxruntime as rt
-        sess = rt.InferenceSession(path + "model.onnx")
-        return sess
+    # def _load_onnx(self, path: str):
+    #     import onnxruntime as rt
+    #     sess = rt.InferenceSession(path + "model.onnx")
+    #     return sess
 
-    def _predict_onnx(self, X):
-        input_name = self._model_onnx.get_inputs()[0].name
-        label_name = self._model_onnx.get_outputs()[0].name
-        return self._model_onnx.run([label_name], {input_name: X})[0]
+    # def _predict_onnx(self, X):
+    #     input_name = self._model_onnx.get_inputs()[0].name
+    #     label_name = self._model_onnx.get_outputs()[0].name
+    #     return self._model_onnx.run([label_name], {input_name: X})[0]
 
-    def _predict_proba_onnx(self, X):
-        input_name = self._model_onnx.get_inputs()[0].name
-        label_name = self._model_onnx.get_outputs()[1].name
-        pred_proba = self._model_onnx.run([label_name], {input_name: X})[0]
-        pred_proba = np.array([[r[i] for i in range(self.num_classes)] for r in pred_proba])
-        return pred_proba
-
-    def _tvm_compile(self, X, enable_tuner=True):
-        import pdb
-        pdb.set_trace()
-        from hummingbird.ml import convert as hb_convert
-        input_shape = list(X.shape)
-        input_shape[0] = 512
-        self._model_tvm = hb_convert(self.model, 'tvm', extra_config={
-            "batch_size": 512, "test_input": [np.random.rand(*input_shape)]})
-        self._model_tvm.save(self.path + "model_tvm")
-
-    def _predict_tvm(self, X):
-        input_name = self._model_onnx.get_inputs()[0].name
-        label_name = self._model_onnx.get_outputs()[0].name
-        return self._model_onnx.run([label_name], {input_name: X})[0]
+    # def _predict_proba_onnx(self, X):
+    #     input_name = self._model_onnx.get_inputs()[0].name
+    #     label_name = self._model_onnx.get_outputs()[1].name
+    #     pred_proba = self._model_onnx.run([label_name], {input_name: X})[0]
+    #     pred_proba = np.array([[r[i] for i in range(self.num_classes)] for r in pred_proba])
+    #     return pred_proba
 
     # TODO: Remove this after simplifying _predict_proba to reduce code duplication. This is only present for SOFTCLASS support.
     def _predict_proba(self, X, **kwargs):
@@ -525,7 +595,7 @@ class RFModel(AbstractModel):
     #     return model
     #
     def _valid_compilers(self):
-        return [RFOnnxCompiler]
+        return [RFNativeCompiler, RFOnnxCompiler, RFTVMCompiler]
 
     def _get_compiler(self):
         compiler = self.params_aux.get('compiler', None)
@@ -537,7 +607,7 @@ class RFModel(AbstractModel):
             return RFOnnxCompiler
         compiler_cls = compiler_names[compiler]
         if not compiler_cls.can_compile():
-            compiler_cls = RFOnnxCompiler
+            compiler_cls = RFNativeCompiler
         return compiler_cls
 
     def save(self, path: str = None, verbose=True) -> str:
