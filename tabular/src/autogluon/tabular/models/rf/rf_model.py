@@ -48,7 +48,7 @@ class RFTVMPredictor:
         y_pred = []
         batch_size = self.model._batch_size
         # batching via groupby
-        for batch_id, batch_np in enumerate(np.split(X, np.arange(0, len(X), batch_size))):
+        for batch_id, batch_np in enumerate(np.split(X, np.arange(0, len(X), batch_size) + batch_size)):
             if batch_np.shape[0] != batch_size:
                 # padding
                 pad_shape = list(batch_np.shape)
@@ -66,7 +66,7 @@ class RFTVMPredictor:
         y_pred = []
         batch_size = self.model._batch_size
         # batching via groupby
-        for batch_id, batch_np in enumerate(np.split(X, np.arange(0, len(X), batch_size))):
+        for batch_id, batch_np in enumerate(np.split(X, np.arange(0, len(X), batch_size) + batch_size)):
             if batch_np.shape[0] != batch_size:
                 # padding
                 pad_shape = list(batch_np.shape)
@@ -168,12 +168,14 @@ class RFTVMCompiler:
             from hummingbird.ml import load as hb_load
             tvm_model = hb_load(path + "model_tvm")
         else:
-            tvm_model = hb_convert(model, 'tvm', extra_config={
+            tvm_model = hb_convert(model, self.name, extra_config={
                 "batch_size": batch_size, "test_input": np.random.rand(*input_shape)})
             tvm_model.save(path + "model_tvm")
         model = RFTVMPredictor(model=tvm_model)
         return model
 
+class RFPyTorchCompiler(RFTVMCompiler):
+    name = 'pytorch'
 
 class RFModel(AbstractModel):
     """
@@ -595,7 +597,7 @@ class RFModel(AbstractModel):
     #     return model
     #
     def _valid_compilers(self):
-        return [RFNativeCompiler, RFOnnxCompiler, RFTVMCompiler]
+        return [RFNativeCompiler, RFOnnxCompiler, RFPyTorchCompiler, RFTVMCompiler]
 
     def _get_compiler(self):
         compiler = self.params_aux.get('compiler', None)

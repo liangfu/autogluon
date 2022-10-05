@@ -39,17 +39,13 @@ def benchmark(hyperparameters):
     # print(test_data.head())
 
     perf = predictor.evaluate(test_data)  # shorthand way to evaluate our predictor if test-labels are available
-    # import pdb
-    # pdb.set_trace()
 
     trainer = predictor._learner.load_trainer()
     model_names = trainer.get_model_names()
-    # best = trainer._get_best()
-    # model = trainer.load_model(best)
-    # models = model.models
 
     for name in model_names:
         model = trainer.load_model(name)
+
         from autogluon.core.models.ensemble.weighted_ensemble_model import WeightedEnsembleModel
         from autogluon.tabular.models.tabular_nn.torch.tabular_nn_torch import TabularNeuralNetTorchModel
         from autogluon.tabular.models.knn.knn_model import KNNModel
@@ -57,6 +53,7 @@ def benchmark(hyperparameters):
         from autogluon.tabular.models.xt.xt_model import XTModel
         from autogluon.tabular.models.lgb.lgb_model import LGBModel
         from autogluon.tabular.models.xgboost.xgboost_model import XGBoostModel
+
         if isinstance(model, WeightedEnsembleModel):
             base_name = model.base_model_names[0]
             model = trainer.load_model(base_name)
@@ -107,25 +104,16 @@ def benchmark(hyperparameters):
             y_pred_skl = model.model.predict_proba(X)
             print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
 
-            model.params_aux['compiler'] = "onnx"
-            model.compile()
-            tic = time.time()
-            y_pred_tvm = model.model.predict_proba(X)
-            print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
-            tic = time.time()
-            y_pred_tvm = model.model.predict_proba(X)
-            print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
-            assert_allclose(y_pred_skl, y_pred_tvm, rtol=1e-5, atol=1e-5)
-
-            model.params_aux['compiler'] = "tvm"
-            model.compile()
-            tic = time.time()
-            y_pred_tvm = model.model.predict_proba(X)
-            print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
-            tic = time.time()
-            y_pred_tvm = model.model.predict_proba(X)
-            print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
-            # assert_allclose(y_pred_skl, y_pred_tvm, rtol=1e-5, atol=1e-5)
+            for compiler in ["onnx", "pytorch", "tvm"]:
+                model.params_aux['compiler'] = compiler
+                model.compile()
+                tic = time.time()
+                y_pred_tvm = model.model.predict_proba(X)
+                print(f"{compiler} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+                tic = time.time()
+                y_pred_tvm = model.model.predict_proba(X)
+                print(f"{compiler} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+                assert_allclose(y_pred_skl, y_pred_tvm, rtol=1e-5, atol=1e-5)
 
         elif isinstance(model, (LGBModel)):
             model.params_aux['compiler'] = "native"
@@ -193,8 +181,8 @@ if __name__=="__main__":
 
     hyperparameters = {
         # 'NN_TORCH': {'ag_args_fit': {'compiler': 'tvm'}},
-        # 'RF': {'ag_args_fit': {'compiler': 'native'}},
-        # 'KNN': {'ag_args_fit': {'compiler': 'onnx'}},
+        'RF': {'ag_args_fit': {'compiler': 'native'}},
+        # 'KNN': {'ag_args_fit': {'compiler': 'native'}},
         'XT': {'ag_args_fit': {'compiler': 'native'}},
         # 'GBM': {'ag_args_fit': {'compiler': 'native'}},
         # 'XGB': {'ag_args_fit': {'compiler': 'tvm'}},
