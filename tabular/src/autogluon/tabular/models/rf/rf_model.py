@@ -159,18 +159,21 @@ class RFTVMCompiler:
 
     @staticmethod
     def load(obj, path: str):
+        compiler = obj._compiler.name
         model = RFNativeCompiler.load(obj, path)
         from hummingbird.ml import convert as hb_convert
         import os
         batch_size = 5120
         input_shape = (batch_size, obj._num_features_post_process)
-        if os.path.exists(path + "model_tvm.zip"):
+        if os.path.exists(path + f"model_{compiler}.zip"):
             from hummingbird.ml import load as hb_load
-            tvm_model = hb_load(path + "model_tvm")
+            tvm_model = hb_load(path + f"model_{compiler}")
         else:
-            tvm_model = hb_convert(model, self.name, extra_config={
-                "batch_size": batch_size, "test_input": np.random.rand(*input_shape)})
-            tvm_model.save(path + "model_tvm")
+            if compiler == "tvm":
+                print("Building TVM model, this may take a few minutes...")
+            test_input = np.random.rand(*input_shape)
+            tvm_model = hb_convert(model, compiler, test_input = test_input)
+            tvm_model.save(path + f"model_{compiler}")
         model = RFTVMPredictor(model=tvm_model)
         return model
 

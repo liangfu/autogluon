@@ -89,15 +89,6 @@ def benchmark(hyperparameters):
             assert_allclose(y_pred_skl, y_pred_onx)
 
         elif isinstance(model, (RFModel, XTModel, WeightedEnsembleModel)):
-            # tic = time.time()
-            # y_pred_skl = model.model.predict(X)
-            # print(f"skl elapsed: {(time.time() - tic)*1000.0:.0f} ms")
-
-            # tic = time.time()
-            # y_pred_onx = model._predict_onnx(X)
-            # print(f"onx elapsed: {(time.time() - tic)*1000.0:.0f} ms")
-            # assert_allclose(y_pred_skl, y_pred_onx)
-
             model.params_aux['compiler'] = "native"
             model.compile()
             tic = time.time()
@@ -122,35 +113,16 @@ def benchmark(hyperparameters):
             y_pred_lgb = model.model.predict(X)
             print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
 
-            model.params_aux['compiler'] = "lleaves"
-            model.compile()
-            tic = time.time()
-            y_pred_lleaves = model.model.predict(X)
-            print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
-            tic = time.time()
-            y_pred_lleaves = model.model.predict(X)
-            print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
-            assert_allclose(y_pred_lgb, y_pred_lleaves)
-
-            model.params_aux['compiler'] = "pytorch"
-            model.compile()
-            tic = time.time()
-            y_pred_tvm = model.model.predict(X)
-            print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
-            tic = time.time()
-            y_pred_tvm = model.model.predict(X)
-            print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
-            # assert_allclose(y_pred_lgb, y_pred_tvm)
-
-            model.params_aux['compiler'] = "tvm"
-            model.compile()
-            tic = time.time()
-            y_pred_tvm = model.model.predict(X)
-            print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
-            tic = time.time()
-            y_pred_tvm = model.model.predict(X)
-            print(f"{model.params_aux['compiler']} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
-            # assert_allclose(y_pred_lgb, y_pred_tvm)
+            for compiler in ["lleaves", "pytorch", "tvm"]:
+                model.params_aux['compiler'] = compiler
+                model.compile()
+                tic = time.time()
+                y_pred_tvm = model.model.predict(X)
+                print(f"{compiler} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+                tic = time.time()
+                y_pred_tvm = model.model.predict(X)
+                print(f"{compiler} elapsed: {(time.time() - tic)*1000.0:.0f} ms")
+                assert_allclose(y_pred_lgb, y_pred_tvm)
 
         elif isinstance(model, (XGBoostModel)):
             model.params_aux['compiler'] = "native"
@@ -182,9 +154,9 @@ if __name__=="__main__":
     hyperparameters = {
         # 'NN_TORCH': {'ag_args_fit': {'compiler': 'tvm'}},
         'RF': {'ag_args_fit': {'compiler': 'native'}},
-        # 'KNN': {'ag_args_fit': {'compiler': 'native'}},
+        'KNN': {'ag_args_fit': {'compiler': 'native'}},
         'XT': {'ag_args_fit': {'compiler': 'native'}},
-        # 'GBM': {'ag_args_fit': {'compiler': 'native'}},
+        'GBM': {'ag_args_fit': {'compiler': 'native'}},
         # 'XGB': {'ag_args_fit': {'compiler': 'tvm'}},
         # 'CAT': {},
     }

@@ -25,37 +25,15 @@ from .lgb_utils import construct_dataset
 warnings.filterwarnings("ignore", category=UserWarning, message="Starting from version")  # lightGBM brew libomp warning
 logger = logging.getLogger(__name__)
 
-
 class LGBLLeavesPredictor:
     def __init__(self, model):
         self.model = model
 
     def predict(self, X, **kwargs):
+        import pdb
+        pdb.set_trace()
+        X.to_csv("xx.csv", index=False)
         return self.model.predict(X, **kwargs)
-
-
-class LGBPyTorchPredictor:
-    def __init__(self, model):
-        self.model = model
-
-    def predict(self, X, **kwargs):
-        y_pred = []
-        batch_size = self.model._batch_size
-        # batching via groupby
-        for batch_id, batch_df in X.groupby(np.arange(len(X)) // batch_size):
-            batch_df = batch_df.to_numpy()
-            if batch_df.shape[0] != batch_size:
-                # padding
-                pad_shape = list(batch_df.shape)
-                pad_shape[0] = batch_size - batch_df.shape[0]
-                X_pad = np.zeros(tuple(pad_shape))
-                batch_df = np.concatenate([batch_df, X_pad])
-            y_pred.append(self.model.predict(batch_df.astype(np.float32), **kwargs))
-        y_pred = np.concatenate(y_pred)
-        # remove padding
-        if y_pred.shape[0] != X.shape[0]:
-           y_pred = y_pred[:X.shape[0]]
-        return y_pred
 
 
 class LGBTVMPredictor:
@@ -63,18 +41,22 @@ class LGBTVMPredictor:
         self.model = model
 
     def predict(self, X, **kwargs):
+        import pdb
+        pdb.set_trace()
         y_pred = []
         batch_size = self.model._batch_size
         # batching via groupby
         for batch_id, batch_df in X.groupby(np.arange(len(X)) // batch_size):
-            batch_df = batch_df.to_numpy()
-            if batch_df.shape[0] != batch_size:
+            batch_np = batch_df.to_numpy()
+            if batch_np.shape[0] != batch_size:
                 # padding
-                pad_shape = list(batch_df.shape)
-                pad_shape[0] = batch_size - batch_df.shape[0]
+                pad_shape = list(batch_np.shape)
+                pad_shape[0] = batch_size - batch_np.shape[0]
                 X_pad = np.zeros(tuple(pad_shape))
-                batch_df = np.concatenate([batch_df, X_pad])
-            y_pred.append(self.model.predict(batch_df.astype(np.float64)))
+                batch_np = np.concatenate([batch_np, X_pad])
+            batch_np = batch_np.astype(np.float32)
+            y_pred_batch = self.model.predict(batch_np)
+            y_pred.append(y_pred_batch)
         y_pred = np.concatenate(y_pred)
         # remove padding
         if y_pred.shape[0] != X.shape[0]:
@@ -92,20 +74,31 @@ class LGBNativeCompiler:
 
     @staticmethod
     def compile(obj, path: str):
+        # import pdb
+        # pdb.set_trace()
         import lightgbm as lgb
+        # def get_sklearn_model(model):
+        #     if obj.problem_type == BINARY:
+        #         return lgb.LGBMClassifier(**model.params)
+        #     else:
+        #         raise NotImplementedError(f"problem type {obj.problem_type} not supported")
         if isinstance(obj.model, lgb.Booster):
             obj.model.save_model(path + 'model.txt', num_iteration=obj.model.best_iteration)
         else:
             # import pdb
             # pdb.set_trace()
             # obj.save(path + 'model.txt', num_iteration=obj.model.best_iteration)
-            return lgb.Booster(model_file=path + 'model.txt')
+            model = lgb.Booster(model_file=path + 'model.txt')
+            return model
         return obj.model
 
     @staticmethod
     def load(obj, path: str):
+        # import pdb
+        # pdb.set_trace()
         import lightgbm as lgb
-        return lgb.Booster(model_file=path + 'model.txt')
+        model = lgb.Booster(model_file=path + 'model.txt')
+        return model
 
 
 class LGBModelLLeavesCompiler:
@@ -133,36 +126,13 @@ class LGBModelLLeavesCompiler:
         model = LGBLLeavesPredictor(model=llvm_model)
         return model
 
-
-class LGBModelPyTorchCompiler:
-    name = 'pytorch'
-    save_in_pkl = False
-
-    @staticmethod
-    def can_compile():
-        try:
-            try_import_torch()
-            return True
-        except ImportError:
-            return False
-
-    @staticmethod
-    def compile(obj, path: str):
-        LGBNativeCompiler.compile(obj=obj, path=path)
-        return LGBModelPyTorchCompiler.load(obj=obj, path=path)
-
-    @staticmethod
-    def load(obj, path: str):
-        model = LGBNativeCompiler.load(obj, path)
-        from hummingbird.ml import convert as hb_convert
-        batch_size = 5120
-        input_shape = (batch_size, model.num_feature())
-        pt_model = hb_convert(model, 'pytorch', extra_config={
-            "batch_size": batch_size, "test_input": np.random.rand(*input_shape)})
-        pt_model.save(path + "model_pt")
-        model = LGBPyTorchPredictor(model=pt_model)
-        return model
-
+#### HACK, HACK and HACK
+def get_categorical_feature(model):
+    import ast
+    model_str_list = str(model.model_to_string()).split("\n")
+    categorical_feature_str = list(filter(lambda x: 'categorical_feature' in x, model_str_list))[0]
+    categorical_feature = ast.literal_eval("["+categorical_feature_str.split()[1])
+    return categorical_feature
 
 class LGBModelTVMCompiler:
     name = 'tvm'
@@ -183,15 +153,38 @@ class LGBModelTVMCompiler:
 
     @staticmethod
     def load(obj, path: str):
+        import pdb
+        pdb.set_trace()
+        import pandas as pd
+
+        compiler = obj._compiler.name
         model = LGBNativeCompiler.load(obj, path)
+
+        # DEBUGGING CORRECTNESS ISSUE
+        feature_name = model.feature_name()
+        categorical_feature = get_categorical_feature(model)
+        X = pd.read_csv("xx.csv").astype(dict(
+            [(feature_name[c], 'category') for c in categorical_feature]
+        ))
+        y_pred_ref = model.predict(X)
+
         from hummingbird.ml import convert as hb_convert
         batch_size = 5120
         input_shape = (batch_size, model.num_feature())
-        tvm_model = hb_convert(model, 'tvm', extra_config={
-            "batch_size": batch_size, "test_input": np.random.rand(*input_shape)})
-        tvm_model.save(path + "model_tvm")
-        model = LGBTVMPredictor(model=tvm_model)
-        return model
+        test_input = np.random.rand(*input_shape)
+        tvm_model = hb_convert(model, compiler, test_input=test_input, extra_config={
+            "batch_size": batch_size, "test_input": test_input})
+        tvm_model.save(path + f"model_{compiler}")
+        tvm_model = LGBTVMPredictor(model=tvm_model)
+
+        # DEBUGGING CORRECTNESS ISSUE
+        y_pred_tvm = tvm_model.predict(X)
+
+        return tvm_model
+
+
+class LGBModelPyTorchCompiler(LGBModelTVMCompiler):
+    name = 'pytorch'
 
 
 # TODO: Save dataset to binary and reload for HPO. This will avoid the memory spike overhead when training each model and instead it will only occur once upon saving the dataset.
@@ -399,6 +392,9 @@ class LGBModel(AbstractModel):
             num_cpus = psutil.cpu_count()
         if self.problem_type == REGRESSION:
             return self.model.predict(X, n_jobs=num_cpus)
+
+        import pdb
+        pdb.set_trace()
 
         y_pred_proba = self.model.predict(X, n_jobs=num_cpus)
         if self.problem_type == BINARY:
