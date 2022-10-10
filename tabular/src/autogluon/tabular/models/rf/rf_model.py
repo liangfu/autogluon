@@ -172,13 +172,17 @@ class RFTVMCompiler:
             if compiler == "tvm":
                 print("Building TVM model, this may take a few minutes...")
             test_input = np.random.rand(*input_shape)
-            tvm_model = hb_convert(model, compiler, test_input = test_input)
+            tvm_model = hb_convert(model, compiler, test_input = test_input, extra_config={
+                "batch_size": batch_size, "test_input": test_input})
             tvm_model.save(path + f"model_{compiler}")
         model = RFTVMPredictor(model=tvm_model)
         return model
 
 class RFPyTorchCompiler(RFTVMCompiler):
     name = 'pytorch'
+
+class RFTorchScriptCompiler(RFTVMCompiler):
+    name = 'torchscript'
 
 class RFModel(AbstractModel):
     """
@@ -222,6 +226,8 @@ class RFModel(AbstractModel):
     # TODO: X.fillna -inf? Add extra is_missing column?
     def _preprocess(self, X, **kwargs):
         X = super()._preprocess(X, **kwargs)
+
+        tic = time.time()
         if self._feature_generator is None:
             self._feature_generator = LabelEncoderFeatureGenerator(verbosity=0)
             self._feature_generator.fit(X=X)
@@ -229,6 +235,7 @@ class RFModel(AbstractModel):
             X = X.copy()
             X[self._feature_generator.features_in] = self._feature_generator.transform(X=X)
         X = X.fillna(0).to_numpy(dtype=np.float32)
+        print(f"    [{(time.time() - tic)*1000.0:.0f} ms (preprocess.2)] ")
         return X
 
     def _set_default_params(self):
@@ -600,7 +607,7 @@ class RFModel(AbstractModel):
     #     return model
     #
     def _valid_compilers(self):
-        return [RFNativeCompiler, RFOnnxCompiler, RFPyTorchCompiler, RFTVMCompiler]
+        return [RFNativeCompiler, RFOnnxCompiler, RFPyTorchCompiler, RFTorchScriptCompiler, RFTVMCompiler]
 
     def _get_compiler(self):
         compiler = self.params_aux.get('compiler', None)

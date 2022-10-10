@@ -122,6 +122,7 @@ class AbstractTabularLearner(AbstractLearner):
         raise NotImplementedError
 
     def predict_proba(self, X: DataFrame, model=None, as_pandas=True, as_multiclass=True, inverse_transform=True, transform_features=True):
+        import time
         if as_pandas:
             X_index = copy.deepcopy(X.index)
         else:
@@ -130,8 +131,14 @@ class AbstractTabularLearner(AbstractLearner):
             y_pred_proba = np.array([])
         else:
             if transform_features:
+                tic = time.time()
                 X = self.transform_features(X)
-            y_pred_proba = self.load_trainer().predict_proba(X, model=model)
+                print(f"[{(time.time() - tic)*1000.0:.0f} ms (learner.transform_features)] ")
+                
+            tic = time.time()
+            trainer = self.load_trainer()
+            y_pred_proba = trainer.predict_proba(X, model=model)
+            print(f"[{(time.time() - tic)*1000.0:.0f} ms (learner.predict_proba)] ")
         if inverse_transform:
             y_pred_proba = self.label_cleaner.inverse_transform_proba(y_pred_proba)
         if as_multiclass and (self.problem_type == BINARY):

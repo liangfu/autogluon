@@ -4,6 +4,8 @@ import numpy as np
 import math
 import psutil
 import time
+import pickle
+import os
 
 from autogluon.common.features.types import R_INT, R_FLOAT, S_BOOL
 from autogluon.core.constants import BINARY, MULTICLASS, REGRESSION
@@ -11,8 +13,188 @@ from autogluon.core.utils import get_cpu_count
 from autogluon.core.utils.exceptions import NotEnoughMemoryError
 from autogluon.core.models import AbstractModel
 from autogluon.core.utils.utils import normalize_pred_probas
+from autogluon.core.utils import try_import_torch, try_import_tvm
 
 logger = logging.getLogger(__name__)
+
+
+# FIXME: DOESNT WORK ON REGRESSION PREDICTIONS
+class KNNOnnxPredictor:
+    def __init__(self, obj, model, path):
+        import onnxruntime as rt
+        self.num_classes = obj.num_classes
+        self.model = model
+
+        ########################################################
+        # HACK, HACK, HACK
+        if model.graph.initializer[0].data_type == 2:
+            model.graph.initializer[0].data_type = 6
+        ########################################################
+
+        self._sess = rt.InferenceSession(model.SerializeToString())
+
+    def predict(self, X):
+        input_name = self._sess.get_inputs()[0].name
+        label_name = self._sess.get_outputs()[0].name
+        return self._sess.run([label_name], {input_name: X})[0]
+
+    def predict_proba(self, X):
+        input_name = self._sess.get_inputs()[0].name
+        label_name = self._sess.get_outputs()[1].name
+        pred_proba = self._sess.run([label_name], {input_name: X})[0]
+        pred_proba = np.array([[r[i] for i in range(self.num_classes)] for r in pred_proba])
+        return pred_proba
+
+
+class KNNTVMPredictor:
+    def __init__(self, model):
+        self.model = model
+
+    def predict(self, X, **kwargs):
+        y_pred = []
+        batch_size = self.model._batch_size
+        # batching via groupby
+        for batch_id, batch_np in enumerate(np.split(X, np.arange(0, len(X), batch_size) + batch_size)):
+            if batch_np.shape[0] != batch_size:
+                # padding
+                pad_shape = list(batch_np.shape)
+                pad_shape[0] = batch_size - batch_np.shape[0]
+                X_pad = np.zeros(tuple(pad_shape))
+                batch_np = np.concatenate([batch_np, X_pad])
+            y_pred.append(self.model.predict(batch_np.astype(np.float64)))
+        y_pred = np.concatenate(y_pred)
+        # remove padding
+        if y_pred.shape[0] != X.shape[0]:
+           y_pred = y_pred[:X.shape[0]]
+        return y_pred
+
+    def predict_proba(self, X, **kwargs):
+        y_pred = []
+        batch_size = self.model._batch_size
+        # batching via groupby
+        for batch_id, batch_np in enumerate(np.split(X, np.arange(0, len(X), batch_size) + batch_size)):
+            if batch_np.shape[0] != batch_size:
+                # padding
+                pad_shape = list(batch_np.shape)
+                pad_shape[0] = batch_size - batch_np.shape[0]
+                X_pad = np.zeros(tuple(pad_shape))
+                batch_np = np.concatenate([batch_np, X_pad])
+            y_pred.append(self.model.predict_proba(batch_np.astype(np.float64)))
+        y_pred = np.concatenate(y_pred)
+        # remove padding
+        if y_pred.shape[0] != X.shape[0]:
+           y_pred = y_pred[:X.shape[0]]
+        return y_pred
+
+
+class KNNNativeCompiler:
+    name = 'native'
+    save_in_pkl = True
+
+    @staticmethod
+    def can_compile():
+        return True
+
+    @staticmethod
+    def compile(obj, path: str):
+        from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
+        if isinstance(obj.model, (KNeighborsClassifier, KNeighborsRegressor)):
+            with open(path + 'model_native.pkl', 'wb') as fp:
+                fp.write(pickle.dumps(obj))
+        elif os.path.exists(path + 'model_native.pkl'):
+            pkl = None
+            with open(path + 'model_native.pkl', 'rb') as fp:
+                pkl = fp.read()
+            return pickle.loads(pkl).model
+        else:
+            raise RuntimeError(f"file {path + 'model_native.pkl'} not found for {type(obj.model)}")
+        return obj.model
+
+    @staticmethod
+    def load(obj, path: str):
+        if not os.path.exists(path + 'model_native.pkl'):
+            import pdb
+            pdb.set_trace()
+            raise RuntimeError(f"file {path + 'model_native.pkl'} not found")
+        pkl = None
+        with open(path + 'model_native.pkl', 'rb') as fp:
+            pkl = fp.read()
+        model = pickle.loads(pkl)
+        return model.model
+
+
+class KNNOnnxCompiler:
+    name = 'onnx'
+    save_in_pkl = False
+
+    @staticmethod
+    def can_compile():
+        try:
+            import skl2onnx
+            return True
+        except ImportError:
+            return False
+
+    @staticmethod
+    def compile(obj, path: str):
+        from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
+        if isinstance(obj.model, (KNeighborsClassifier, KNeighborsRegressor)):
+            KNNNativeCompiler.compile(obj=obj, path=path)
+        return KNNOnnxCompiler.load(obj=obj, path=path)
+
+    @staticmethod
+    def load(obj, path: str):
+        model = KNNNativeCompiler.load(obj, path)
+        from skl2onnx import convert_sklearn
+        from skl2onnx.common.data_types import FloatTensorType
+        initial_type = [('float_input', FloatTensorType([None, obj._num_features_post_process]))]
+        onnx_model = convert_sklearn(model, initial_types=initial_type)
+        return KNNOnnxPredictor(obj=obj, model=onnx_model, path=path)
+
+
+class KNNTVMCompiler:
+    name = 'tvm'
+    save_in_pkl = False
+
+    @staticmethod
+    def can_compile():
+        try:
+            try_import_tvm()
+            return True
+        except ImportError:
+            return False
+
+    @staticmethod
+    def compile(obj, path: str):
+        KNNNativeCompiler.compile(obj=obj, path=path)
+        return KNNTVMCompiler.load(obj=obj, path=path)
+
+    @staticmethod
+    def load(obj, path: str):
+        compiler = obj._compiler.name
+        model = KNNNativeCompiler.load(obj, path)
+        from hummingbird.ml import convert as hb_convert
+        import os
+        batch_size = 5120
+        input_shape = (batch_size, obj._num_features_post_process)
+        if os.path.exists(path + f"model_{compiler}.zip"):
+            from hummingbird.ml import load as hb_load
+            tvm_model = hb_load(path + f"model_{compiler}")
+        else:
+            if compiler == "tvm":
+                print("Building TVM model, this may take a few minutes...")
+            test_input = np.random.rand(*input_shape)
+            tvm_model = hb_convert(model, compiler, test_input = test_input, extra_config={
+                "batch_size": batch_size, "test_input": test_input})
+            tvm_model.save(path + f"model_{compiler}")
+        model = KNNTVMPredictor(model=tvm_model)
+        return model
+
+class KNNPyTorchCompiler(KNNTVMCompiler):
+    name = 'pytorch'
+
+class KNNTorchScriptCompiler(KNNTVMCompiler):
+    name = 'torchscript'
 
 
 # TODO: Normalize data!
@@ -120,71 +302,41 @@ class KNNModel(AbstractModel):
             if model_memory_ratio > (0.20 * max_memory_usage_ratio):
                 raise NotEnoughMemoryError  # don't train full model to avoid OOM error
 
-    def compile(self, backend="onnx"):
-        self._backend = backend
-        if backend == "onnx":
-            self._onnx_compile()
-        else:
-            self._tvm_compile()
+    def _valid_compilers(self):
+        return [KNNNativeCompiler, KNNOnnxCompiler, KNNPyTorchCompiler, KNNTorchScriptCompiler, KNNTVMCompiler]
 
-    def _onnx_compile(self):
-        path = self.path
-        print('compiling')
-        import os
-        from skl2onnx import convert_sklearn
-        from skl2onnx.common.data_types import FloatTensorType
+    def _get_compiler(self):
+        compiler = self.params_aux.get('compiler', None)
+        compilers = self._valid_compilers()
+        compiler_names = {c.name: c for c in compilers}
+        if compiler is not None and compiler not in compiler_names:
+            raise AssertionError(f'Unknown compiler: {compiler}. Valid compilers: {compiler_names}')
+        if compiler is None:
+            return KNNOnnxCompiler
+        compiler_cls = compiler_names[compiler]
+        if not compiler_cls.can_compile():
+            compiler_cls = KNNNativeCompiler
+        return compiler_cls
 
-        # Convert into ONNX format
-        initial_type = [('float_input', FloatTensorType([None, self._num_features_post_process]))]
-        onx = convert_sklearn(self.model, initial_types=initial_type)
+    def save(self, path: str = None, verbose=True) -> str:
+        _model = self.model
+        if self.model is not None:
+            self._compiler = self._get_compiler()
+            self._is_model_saved = True
+            if self._compiler is not None:
+                self.model = None  # Don't save model in pkl
+        path = super().save(path=path, verbose=verbose)
+        self.model = _model
+        if _model is not None and self._compiler is not None:
+            self.model = self._compiler.compile(obj=self, path=path)
+        return path
 
-        ########################################################
-        # HACK, HACK, HACK
-        if onx.graph.initializer[0].data_type == 2:
-            onx.graph.initializer[0].data_type = 6
-        ########################################################
-
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path + "model.onnx", "wb") as f:
-            f.write(onx.SerializeToString())
-        with open(path + "model_onnx.txt", "wt") as f:
-            f.write(str(onx))
-
-        # Compute the prediction with ONNX Runtime
-        import onnxruntime as rt
-        self._model_onnx = rt.InferenceSession(onx.SerializeToString())
-
-    def _load_onnx(self, path: str):
-        import onnxruntime as rt
-        sess = rt.InferenceSession(path + "model.onnx")
-        return sess
-
-    def _predict_onnx(self, X):
-        input_name = self._model_onnx.get_inputs()[0].name
-        label_name = self._model_onnx.get_outputs()[0].name
-        return self._model_onnx.run([label_name], {input_name: X})[0]
-
-    def _predict_proba_onnx(self, X):
-        input_name = self._model_onnx.get_inputs()[0].name
-        label_name = self._model_onnx.get_outputs()[1].name
-        pred_proba = self._model_onnx.run([label_name], {input_name: X})[0]
-        pred_proba = np.array([[r[i] for i in range(self.num_classes)] for r in pred_proba])
-        return pred_proba
-
-    def _tvm_compile(self, X, enable_tuner=True):
-        import pdb
-        pdb.set_trace()
-        from hummingbird.ml import convert as hb_convert
-        input_shape = list(X.shape)
-        input_shape[0] = 512
-        self._model_tvm = hb_convert(self.model, 'tvm', extra_config={
-            "batch_size": 512, "test_input": (np.random.rand(*input_shape),)})
-        self._model_tvm.save(self.path + "model_tvm")
-
-    def _predict_tvm(self, X):
-        input_name = self._model_onnx.get_inputs()[0].name
-        label_name = self._model_onnx.get_outputs()[0].name
-        return self._model_onnx.run([label_name], {input_name: X})[0]
+    @classmethod
+    def load(cls, path: str, reset_paths=True, verbose=True):
+        model = super().load(path=path, reset_paths=reset_paths, verbose=verbose)
+        if model._is_model_saved:
+            model.model = model._compiler.load(obj=model, path=path)
+        return model
 
     # TODO: Won't work for RAPIDS without modification
     # TODO: Technically isn't OOF, but can be used inplace of OOF. Perhaps rename to something more accurate?

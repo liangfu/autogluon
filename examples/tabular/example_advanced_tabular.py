@@ -21,8 +21,7 @@ from autogluon.tabular.models.xgboost.xgboost_model import XGBoostModel
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-def benchmark(hyperparameters, fit=False):
-
+def benchmark(hyperparameters):
     # Training time:
     train_data = TabularDataset('https://autogluon.s3.amazonaws.com/datasets/Inc/train.csv')  # can be local CSV file as well, returns Pandas DataFrame
     train_data = train_data.head(100)  # subsample for faster demo
@@ -33,15 +32,16 @@ def benchmark(hyperparameters, fit=False):
     # hyperparameters.update(get_hyperparameter_config('default'))
     # print('\n'.join(list(get_hyperparameter_config('default').keys())))
 
-    if fit:
-        import shutil, os
-        if os.path.exists(save_path):
-            shutil.rmtree(save_path)
-        predictor = TabularPredictor(label=label, path=save_path).fit(
-            train_data, hyperparameters=hyperparameters, time_limit=60, verbosity=0
-            # hyperparameter_tune_kwargs='auto'
-        )
-        predictor.save()
+    # Delete previously trained models
+    import shutil, os
+    if os.path.exists(save_path):
+        shutil.rmtree(save_path)
+
+    predictor = TabularPredictor(label=label, path=save_path).fit(
+        train_data, hyperparameters=hyperparameters, time_limit=60, verbosity=0
+        # hyperparameter_tune_kwargs='auto'
+    )
+    predictor.save()
     predictor = TabularPredictor.load(path=save_path)
 
     # results = predictor.fit_summary()  # display detailed summary of fit() process
@@ -51,35 +51,61 @@ def benchmark(hyperparameters, fit=False):
     test_data = TabularDataset('https://autogluon.s3.amazonaws.com/datasets/Inc/test.csv')  # another Pandas DataFrame
     # print(test_data.head())
 
-    perf = predictor.evaluate(test_data)  # shorthand way to evaluate our predictor if test-labels are available
+    # perf = predictor.evaluate(test_data)  # shorthand way to evaluate our predictor if test-labels are available
 
     trainer = predictor._learner.load_trainer()
     model_names = trainer.get_model_names()
 
-    from autogluon.core.models.ensemble.weighted_ensemble_model import WeightedEnsembleModel
+    supported_compilers = {
+        "KNeighbors":   ["onnx", "pytorch"],
+        "RandomForest": ["onnx", "pytorch", "tvm"],
+        "ExtraTrees":   ["onnx", "pytorch", "tvm"],
+        "LightGBM":     ["lleaves", "pytorch", "tvm"],
+        # "XGB": ["onnx", "pytorch", "tvm"],
+        # "NN_TORCH": ["pytorch", "tvm"],
+    }
+    # for compiler in ["onnx", "pytorch", "tvm"]:
+
+    # Evaluate timing results on all models
     for name in model_names:
         model = trainer.load_model(name)
         if isinstance(model, WeightedEnsembleModel):
-            base_name = model.base_model_names[0]
-            model = trainer.load_model(base_name)
-        model.params_aux['compiler'] = list(hyperparameters.items())[0][1]["ag_args_fit"]['compiler']
-        # import pdb
-        # pdb.set_trace()
+            name = model.base_model_names[0]
+            assert name in supported_compilers, f"unsupported base model {name}"
+            model = trainer.load_model(name)
+
+        # Timing results for native compiler
+        compiler = "native"
+        model.params_aux['compiler'] = compiler
         model.compile()
+        tic = time.time()
+        print('--')
+        y_pred_native = predictor.predict_proba(test_data)
+        print('--')
+        print(f"{compiler} elapsed {(time.time() - tic)*1000.0:.0f} ms")
+        
+        # Timing results for all supported compilers (e.g. onnx, pytorch, tvm)
+        for compiler in supported_compilers[name]:
+            model.params_aux['compiler'] = compiler
+            model.compile()
 
-    # Otherwise we make predictions and can evaluate them later:
-    # if model.params_aux['compiler'] == "tvm":
-    #     import pdb
-    #     pdb.set_trace()
-    tic = time.time()
-    y_pred = predictor.predict_proba(test_data)
-    print(f"elapsed {(time.time() - tic)*1000.0:.0f} ms for {hyperparameters}")
-    tic = time.time()
-    y_pred = predictor.predict_proba(test_data)
-    print(f"elapsed {(time.time() - tic)*1000.0:.0f} ms for {hyperparameters}")
-    perf = predictor.evaluate_predictions(y_true=test_data[label], y_pred=y_pred, auxiliary_metrics=True)
+            # Otherwise we make predictions and can evaluate them later:
+            # tic = time.time()
+            # y_pred = predictor.predict_proba(test_data)
+            # print(f"elapsed {(time.time() - tic)*1000.0:.0f} ms for {hyperparameters}")
+            tic = time.time()
+            print('--')
+            y_pred = predictor.predict_proba(test_data)
+            print('--')
+            print(f"{compiler} elapsed {(time.time() - tic)*1000.0:.0f} ms")
 
-    return y_pred
+            # lightgbm model is not well supported in hummingbird converter,
+            # considier replace lgb.basic.Booster with lgb.LGBMClassifier.
+            if name not in ["LightGBM"]:
+                assert_allclose(y_pred_native, y_pred, atol=1e-5, rtol=1e-5)
+
+        # separate different models
+        print('-------------------------------------------------------')
 
 def benchmark_all(hyperparameters):
 
@@ -226,36 +252,36 @@ if __name__=="__main__":
     }
     # benchmark_all(hyperparameters)
 
-    # hyperparameters = {
-    #     # 'NN_TORCH': {'ag_args_fit': {'compiler': 'native'}},
-    #     'RF': {'ag_args_fit': {'compiler': 'native'}},
-    #     'KNN': {'ag_args_fit': {'compiler': 'native'}},
-    #     'XT': {'ag_args_fit': {'compiler': 'native'}},
-    #     'GBM': {'ag_args_fit': {'compiler': 'native'}},
-    #     # 'XGB': {'ag_args_fit': {'compiler': 'tvm'}},
-    #     # 'CAT': {},
-    # }
-    # benchmark(hyperparameters)
+    hyperparameters = {
+        # 'NN_TORCH': {'ag_args_fit': {'compiler': 'native'}},
+        'RF': {'ag_args_fit': {'compiler': 'native'}},
+        'KNN': {'ag_args_fit': {'compiler': 'native'}},
+        # 'XT': {'ag_args_fit': {'compiler': 'native'}},
+        # 'GBM': {'ag_args_fit': {'compiler': 'native'}},
+        # 'XGB': {'ag_args_fit': {'compiler': 'tvm'}},
+        # 'CAT': {},
+    }
+    benchmark(hyperparameters)
 
-    hyperparameters = {'KNN': {'ag_args_fit': {'compiler': "native"}},}
-    y_pred_ref = benchmark(hyperparameters, fit=True)
-    for compiler in ["onnx", "pytorch"]:
-        hyperparameters = {'KNN': {'ag_args_fit': {'compiler': compiler}},}
-        y_pred_new = benchmark(hyperparameters, fit=False)
-        assert_allclose(y_pred_ref, y_pred_new, rtol=1e-5, atol=1e-5)
-    print("-------------------------------------------------------")
+    # hyperparameters = {'KNN': {'ag_args_fit': {'compiler': "native"}},}
+    # y_pred_ref = benchmark(hyperparameters, fit=True)
+    # for compiler in ["onnx", "pytorch"]:
+    #     hyperparameters = {'KNN': {'ag_args_fit': {'compiler': compiler}},}
+    #     y_pred_new = benchmark(hyperparameters, fit=False)
+    #     assert_allclose(y_pred_ref, y_pred_new, rtol=1e-5, atol=1e-5)
+    # print("-------------------------------------------------------")
 
-    hyperparameters = {'RF': {'ag_args_fit': {'compiler': "native"}},}
-    y_pred_ref = benchmark(hyperparameters, fit=True)
-    for compiler in ["onnx", "pytorch", "tvm"]:
-        hyperparameters = {'RF': {'ag_args_fit': {'compiler': compiler}},}
-        y_pred_new = benchmark(hyperparameters, fit=False)
-        assert_allclose(y_pred_ref, y_pred_new, rtol=1e-5, atol=1e-5)
-    print("-------------------------------------------------------")
+    # hyperparameters = {'RF': {'ag_args_fit': {'compiler': "native"}},}
+    # y_pred_ref = benchmark(hyperparameters, fit=True)
+    # for compiler in ["onnx", "pytorch", "tvm"]:
+    #     hyperparameters = {'RF': {'ag_args_fit': {'compiler': compiler}},}
+    #     y_pred_new = benchmark(hyperparameters, fit=False)
+    #     assert_allclose(y_pred_ref, y_pred_new, rtol=1e-5, atol=1e-5)
+    # print("-------------------------------------------------------")
 
-    hyperparameters = {'XT': {'ag_args_fit': {'compiler': "native"}},}
-    y_pred_ref = benchmark(hyperparameters, fit=True)
-    for compiler in ["onnx", "pytorch", "tvm"]:
-        hyperparameters = {'XT': {'ag_args_fit': {'compiler': compiler}},}
-        y_pred_new = benchmark(hyperparameters, fit=False)
-        assert_allclose(y_pred_ref, y_pred_new, rtol=1e-5, atol=1e-5)
+    # hyperparameters = {'XT': {'ag_args_fit': {'compiler': "native"}},}
+    # y_pred_ref = benchmark(hyperparameters, fit=True)
+    # for compiler in ["onnx", "pytorch", "tvm"]:
+    #     hyperparameters = {'XT': {'ag_args_fit': {'compiler': compiler}},}
+    #     y_pred_new = benchmark(hyperparameters, fit=False)
+    #     assert_allclose(y_pred_ref, y_pred_new, rtol=1e-5, atol=1e-5)

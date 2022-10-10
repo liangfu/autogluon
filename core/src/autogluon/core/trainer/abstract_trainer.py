@@ -556,20 +556,26 @@ class AbstractTrainer:
             If preprocess_nonadaptive=False, call model.predict(X)
             If preprocess_nonadaptive=True, call model.predict(X, preprocess_nonadaptive=False)
         """
+        import time
         if isinstance(model, str):
             # TODO: Remove unnecessary load when no stacking
             model = self.load_model(model)
         model_level = self.get_model_level(model.name)
+
         if model_level > 1 and isinstance(model, StackerEnsembleModel):
             if fit:
                 model_pred_proba_dict = None
             else:
                 model_set = self.get_minimum_model_set(model)
                 model_set = [m for m in model_set if m != model.name]  # TODO: Can probably be faster, get this result from graph
+
+                ## WARNING: potentially time consuming
                 model_pred_proba_dict = self.get_model_pred_proba_dict(X=X, models=model_set, model_pred_proba_dict=model_pred_proba_dict, fit=fit)
             X = model.preprocess(X=X, preprocess_nonadaptive=preprocess_nonadaptive, fit=fit, model_pred_proba_dict=model_pred_proba_dict)
+
         elif preprocess_nonadaptive:
             X = model.preprocess(X=X, preprocess_stateful=False)
+
         return X
 
     def score(self, X, y, model=None, weights=None) -> float:
@@ -604,6 +610,7 @@ class AbstractTrainer:
                                   fit=False,
                                   record_pred_time=False,
                                   use_val_cache: bool = False):
+        import time
         if model_pred_proba_dict is None:
             model_pred_proba_dict = {}
         if model_pred_time_dict is None:
@@ -653,12 +660,17 @@ class AbstractTrainer:
                 else:
                     raise AssertionError(f'Model {model_name} must be a BaggedEnsembleModel to return oof_pred_proba')
             else:
+                tic = time.time()
                 model = self.load_model(model_name=model_name)
+                print(f"  [{(time.time() - tic)*1000.0:.0f} ms (trainer.get_model_pred_proba_dict.load_model)] ")
+
+                tic = time.time()
                 if isinstance(model, StackerEnsembleModel):
                     preprocess_kwargs = dict(infer=False, model_pred_proba_dict=model_pred_proba_dict)
                     model_pred_proba_dict[model_name] = model.predict_proba(X, **preprocess_kwargs)
                 else:
                     model_pred_proba_dict[model_name] = model.predict_proba(X)
+                print(f"  [{(time.time() - tic)*1000.0:.0f} ms (trainer.get_model_pred_proba_dict.predict_proba)] ")
 
             if record_pred_time:
                 time_end = time.time()
@@ -1682,10 +1694,18 @@ class AbstractTrainer:
         return y_pred
 
     def _predict_proba_model(self, X, model, model_pred_proba_dict=None):
+        import time
         if isinstance(model, str):
             model = self.load_model(model)
+
+        tic = time.time()
         X = self.get_inputs_to_model(model=model, X=X, model_pred_proba_dict=model_pred_proba_dict, fit=False)
-        return model.predict_proba(X=X)
+        print(f"  [{(time.time() - tic)*1000.0:.0f} ms (trainer.get_inputs_to_model)] ")
+
+        tic = time.time()
+        y_pred = model.predict_proba(X=X)
+        print(f"  [{(time.time() - tic)*1000.0:.0f} ms (trainer._predict_proba_model)] ")
+        return y_pred
 
     def _get_dummy_stacker(self, level: int, model_levels: dict, use_orig_features=True) -> StackerEnsembleModel:
         model_names = model_levels[level - 1]

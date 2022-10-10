@@ -30,8 +30,6 @@ class LGBLLeavesPredictor:
         self.model = model
 
     def predict(self, X, **kwargs):
-        import pdb
-        pdb.set_trace()
         X.to_csv("xx.csv", index=False)
         return self.model.predict(X, **kwargs)
 
@@ -41,8 +39,6 @@ class LGBTVMPredictor:
         self.model = model
 
     def predict(self, X, **kwargs):
-        import pdb
-        pdb.set_trace()
         y_pred = []
         batch_size = self.model._batch_size
         # batching via groupby
@@ -54,7 +50,7 @@ class LGBTVMPredictor:
                 pad_shape[0] = batch_size - batch_np.shape[0]
                 X_pad = np.zeros(tuple(pad_shape))
                 batch_np = np.concatenate([batch_np, X_pad])
-            batch_np = batch_np.astype(np.float32)
+            batch_np = batch_np.astype(np.float64)
             y_pred_batch = self.model.predict(batch_np)
             y_pred.append(y_pred_batch)
         y_pred = np.concatenate(y_pred)
@@ -153,8 +149,6 @@ class LGBModelTVMCompiler:
 
     @staticmethod
     def load(obj, path: str):
-        import pdb
-        pdb.set_trace()
         import pandas as pd
 
         compiler = obj._compiler.name
@@ -185,6 +179,9 @@ class LGBModelTVMCompiler:
 
 class LGBModelPyTorchCompiler(LGBModelTVMCompiler):
     name = 'pytorch'
+
+class LGBModelTorchScriptCompiler(LGBModelTVMCompiler):
+    name = 'torchscript'
 
 
 # TODO: Save dataset to binary and reload for HPO. This will avoid the memory spike overhead when training each model and instead it will only occur once upon saving the dataset.
@@ -393,9 +390,6 @@ class LGBModel(AbstractModel):
         if self.problem_type == REGRESSION:
             return self.model.predict(X, n_jobs=num_cpus)
 
-        import pdb
-        pdb.set_trace()
-
         y_pred_proba = self.model.predict(X, n_jobs=num_cpus)
         if self.problem_type == BINARY:
             if len(y_pred_proba.shape) == 1:
@@ -505,7 +499,8 @@ class LGBModel(AbstractModel):
         return self._features_internal_list
 
     def _valid_compilers(self):
-        return [LGBNativeCompiler, LGBModelLLeavesCompiler, LGBModelPyTorchCompiler, LGBModelTVMCompiler]
+        return [LGBNativeCompiler, LGBModelLLeavesCompiler,
+                LGBModelPyTorchCompiler, LGBModelTorchScriptCompiler, LGBModelTVMCompiler]
 
     def _get_compiler(self):
         compiler = self.params_aux.get('compiler', None)

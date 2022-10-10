@@ -683,9 +683,13 @@ class AbstractModel:
         For multiclass problems, this returns the class label probabilities of each class as a DataFrame.
         For regression problems, this returns the predicted values as a Series.
         """
+        import time
         if normalize is None:
             normalize = self.normalize_pred_probas
+        tic = time.time()
         y_pred_proba = self._predict_proba(X=X, **kwargs)
+        print(f"    [{(time.time() - tic)*1000.0:.0f} ms (predict_proba.1)] ")
+
         if normalize:
             y_pred_proba = normalize_pred_probas(y_pred_proba, self.problem_type)
         y_pred_proba = y_pred_proba.astype(np.float32)
@@ -694,6 +698,7 @@ class AbstractModel:
             y_pred_proba = self._apply_temperature_scaling(y_pred_proba)
         elif self.conformalize is not None:
             y_pred_proba = self._apply_conformalization(y_pred_proba)
+
         return y_pred_proba
 
     def _predict_proba(self, X, **kwargs):
