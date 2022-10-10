@@ -227,7 +227,6 @@ class RFModel(AbstractModel):
     def _preprocess(self, X, **kwargs):
         X = super()._preprocess(X, **kwargs)
 
-        tic = time.time()
         if self._feature_generator is None:
             self._feature_generator = LabelEncoderFeatureGenerator(verbosity=0)
             self._feature_generator.fit(X=X)
@@ -235,7 +234,6 @@ class RFModel(AbstractModel):
             X = X.copy()
             X[self._feature_generator.features_in] = self._feature_generator.transform(X=X)
         X = X.fillna(0).to_numpy(dtype=np.float32)
-        print(f"    [{(time.time() - tic)*1000.0:.0f} ms (preprocess.2)] ")
         return X
 
     def _set_default_params(self):

@@ -56,6 +56,10 @@ def benchmark(hyperparameters):
     trainer = predictor._learner.load_trainer()
     model_names = trainer.get_model_names()
 
+    # This would help us load all models in memory
+    # Warning: choose to load best model only in production environment
+    predictor.persist_models()
+
     supported_compilers = {
         "KNeighbors":   ["onnx", "pytorch"],
         "RandomForest": ["onnx", "pytorch", "tvm"],
@@ -82,7 +86,7 @@ def benchmark(hyperparameters):
         print('--')
         y_pred_native = predictor.predict_proba(test_data)
         print('--')
-        print(f"{compiler} elapsed {(time.time() - tic)*1000.0:.0f} ms")
+        print(f"{compiler} elapsed {(time.time() - tic)*1000.0:.0f} ms ({name})")
         
         # Timing results for all supported compilers (e.g. onnx, pytorch, tvm)
         for compiler in supported_compilers[name]:
@@ -97,7 +101,7 @@ def benchmark(hyperparameters):
             print('--')
             y_pred = predictor.predict_proba(test_data)
             print('--')
-            print(f"{compiler} elapsed {(time.time() - tic)*1000.0:.0f} ms")
+            print(f"{compiler} elapsed {(time.time() - tic)*1000.0:.0f} ms ({name})")
 
             # lightgbm model is not well supported in hummingbird converter,
             # considier replace lgb.basic.Booster with lgb.LGBMClassifier.
@@ -256,8 +260,8 @@ if __name__=="__main__":
         # 'NN_TORCH': {'ag_args_fit': {'compiler': 'native'}},
         'RF': {'ag_args_fit': {'compiler': 'native'}},
         'KNN': {'ag_args_fit': {'compiler': 'native'}},
-        # 'XT': {'ag_args_fit': {'compiler': 'native'}},
-        # 'GBM': {'ag_args_fit': {'compiler': 'native'}},
+        'XT': {'ag_args_fit': {'compiler': 'native'}},
+        'GBM': {'ag_args_fit': {'compiler': 'native'}},
         # 'XGB': {'ag_args_fit': {'compiler': 'tvm'}},
         # 'CAT': {},
     }

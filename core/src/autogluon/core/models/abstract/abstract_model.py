@@ -686,9 +686,7 @@ class AbstractModel:
         import time
         if normalize is None:
             normalize = self.normalize_pred_probas
-        tic = time.time()
         y_pred_proba = self._predict_proba(X=X, **kwargs)
-        print(f"    [{(time.time() - tic)*1000.0:.0f} ms (predict_proba.1)] ")
 
         if normalize:
             y_pred_proba = normalize_pred_probas(y_pred_proba, self.problem_type)
@@ -702,13 +700,17 @@ class AbstractModel:
         return y_pred_proba
 
     def _predict_proba(self, X, **kwargs):
+        tic = time.time()
         X = self.preprocess(X, **kwargs)
+        print(f"  +---[{(time.time() - tic)*1000.0:.0f} ms (model.preprocess)] ")
 
+        tic = time.time()
         if self.problem_type in [REGRESSION, QUANTILE]:
             y_pred = self.model.predict(X)
             return y_pred
 
         y_pred_proba = self.model.predict_proba(X)
+        print(f"  +---[{(time.time() - tic)*1000.0:.0f} ms (model.predict_proba)] ")
         return self._convert_proba_to_unified_form(y_pred_proba)
 
     def _convert_proba_to_unified_form(self, y_pred_proba):
