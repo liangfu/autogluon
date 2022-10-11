@@ -29,22 +29,23 @@ class EnsembleOnnxCompiler:
         from skl2onnx.common.data_types import FloatTensorType
         from sklearn.pipeline import Pipeline
 
-        import pdb
-        pdb.set_trace()
+        # import pdb
+        # pdb.set_trace()
         for model in obj.models:
             name = model.base_model_names[0]
             base_model = obj.load_model(name)
-            print(base_model)
+            base_model.compile()
+            # print(base_model)
                 
-        pipe = Pipeline(steps=[('model', naive_bayes_model)])
-        initial_type = [('float_input', FloatTensorType([None, obj._num_features_post_process]))]
-        onx = convert_sklearn(obj.model, initial_types=initial_type)
+        # pipe = Pipeline(steps=[('model', naive_bayes_model)])
+        # initial_type = [('float_input', FloatTensorType([None, obj._num_features_post_process]))]
+        # onx = convert_sklearn(obj.model, initial_types=initial_type)
 
-        import os
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path + "model.onnx", "wb") as f:
-            f.write(onx.SerializeToString())
-        return EnsembleOnnxCompiler.load(obj=obj, path=path)
+        # import os
+        # os.makedirs(os.path.dirname(path), exist_ok=True)
+        # with open(path + "model.onnx", "wb") as f:
+        #     f.write(onx.SerializeToString())
+        # return EnsembleOnnxCompiler.load(obj=obj, path=path)
 
     @staticmethod
     def load(obj, path: str):

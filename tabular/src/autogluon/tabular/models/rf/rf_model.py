@@ -63,6 +63,7 @@ class RFTVMPredictor:
         return y_pred
 
     def predict_proba(self, X, **kwargs):
+        tic = time.time()
         y_pred = []
         batch_size = self.model._batch_size
         # batching via groupby
@@ -78,6 +79,7 @@ class RFTVMPredictor:
         # remove padding
         if y_pred.shape[0] != X.shape[0]:
            y_pred = y_pred[:X.shape[0]]
+        # print(f"[{(time.time() - tic)*1000.0:.0f} ms (tvm)]")
         return y_pred
 
 
@@ -164,17 +166,18 @@ class RFTVMCompiler:
         from hummingbird.ml import convert as hb_convert
         import os
         batch_size = 5120
+        model_path = path + f"model_{compiler}"
         input_shape = (batch_size, obj._num_features_post_process)
-        if os.path.exists(path + f"model_{compiler}.zip"):
+        if os.path.exists(model_path + ".zip"):
             from hummingbird.ml import load as hb_load
-            tvm_model = hb_load(path + f"model_{compiler}")
+            tvm_model = hb_load(model_path)
         else:
             if compiler == "tvm":
                 print("Building TVM model, this may take a few minutes...")
             test_input = np.random.rand(*input_shape)
             tvm_model = hb_convert(model, compiler, test_input = test_input, extra_config={
                 "batch_size": batch_size, "test_input": test_input})
-            tvm_model.save(path + f"model_{compiler}")
+            tvm_model.save(model_path)
         model = RFTVMPredictor(model=tvm_model)
         return model
 

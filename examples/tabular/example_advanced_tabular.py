@@ -59,16 +59,16 @@ def benchmark(hyperparameters):
     trainer = predictor._learner.load_trainer()
     model_names = trainer.get_model_names()
 
-    # This would help us load all models in memory
+    # This would help us load *ALL MODELS* in memory
     # Warning: choose to load best model only in production environment
-    predictor.persist_models()
+    predictor.persist_models(models='all')
 
     supported_compilers = {
         "KNeighbors":   ["onnx", "pytorch"],
         "RandomForest": ["onnx", "pytorch", "tvm"],
         "ExtraTrees":   ["onnx", "pytorch", "tvm"],
         "LightGBM":     ["lleaves", "pytorch", "tvm"],
-        # "XGB": ["onnx", "pytorch", "tvm"],
+        # "XGB": ["pytorch", "tvm"],
         # "NN_TORCH": ["pytorch", "tvm"],
     }
     # for compiler in ["onnx", "pytorch", "tvm"]:
@@ -89,9 +89,7 @@ def benchmark(hyperparameters):
         model.params_aux['compiler'] = compiler
         model.compile()
         tic = time.time()
-        print('--')
-        y_pred_native = predictor.predict_proba(test_data, as_pandas=False)
-        print('--')
+        y_pred_native = predictor.predict_proba(test_data, as_pandas=False, model=name)
         print(f"{compiler} elapsed {(time.time() - tic)*1000.0:.0f} ms ({name})")
         
         # Timing results for all supported compilers (e.g. onnx, pytorch, tvm)
@@ -101,12 +99,13 @@ def benchmark(hyperparameters):
 
             # Otherwise we make predictions and can evaluate them later:
             # tic = time.time()
-            # y_pred = predictor.predict_proba(test_data)
+            # if compiler == "tvm" and name == "RandomForest":
+            #     import pdb
+            #     pdb.set_trace()
+            y_pred = predictor.predict_proba(test_data, model=name)
             # print(f"elapsed {(time.time() - tic)*1000.0:.0f} ms for {hyperparameters}")
             tic = time.time()
-            print('--')
-            y_pred = predictor.predict_proba(test_data)
-            print('--')
+            y_pred = predictor.predict_proba(test_data, model=name)
             print(f"{compiler} elapsed {(time.time() - tic)*1000.0:.0f} ms ({name})")
 
             # lightgbm model is not well supported in hummingbird converter,

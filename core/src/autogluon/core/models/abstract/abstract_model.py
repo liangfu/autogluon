@@ -702,7 +702,7 @@ class AbstractModel:
     def _predict_proba(self, X, **kwargs):
         tic = time.time()
         X = self.preprocess(X, **kwargs)
-        print(f"  +---[{(time.time() - tic)*1000.0:.0f} ms (model.preprocess)] ")
+        # print(f"  +---[{(time.time() - tic)*1000.0:.0f} ms (model.preprocess)] ")
 
         tic = time.time()
         if self.problem_type in [REGRESSION, QUANTILE]:
@@ -710,7 +710,7 @@ class AbstractModel:
             return y_pred
 
         y_pred_proba = self.model.predict_proba(X)
-        print(f"  +---[{(time.time() - tic)*1000.0:.0f} ms (model.predict_proba)] ")
+        # print(f"  +---[{(time.time() - tic)*1000.0:.0f} ms (model.predict_proba)] ")
         return self._convert_proba_to_unified_form(y_pred_proba)
 
     def _convert_proba_to_unified_form(self, y_pred_proba):

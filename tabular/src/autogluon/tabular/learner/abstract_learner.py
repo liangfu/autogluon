@@ -134,12 +134,12 @@ class AbstractTabularLearner(AbstractLearner):
             if transform_features:
                 tic = time.time()
                 X = self.transform_features(X)
-                print(f"[{(time.time() - tic)*1000.0:.0f} ms (learner.transform_features)] ")
+                # print(f"[{(time.time() - tic)*1000.0:.0f} ms (learner.transform_features)] ")
                 
             tic = time.time()
             trainer = self.load_trainer()
             y_pred_proba = trainer.predict_proba(X, model=model)
-            print(f"[{(time.time() - tic)*1000.0:.0f} ms (learner.predict_proba)] ")
+            # print(f"[{(time.time() - tic)*1000.0:.0f} ms (learner.predict_proba)] ")
         if inverse_transform:
             y_pred_proba = self.label_cleaner.inverse_transform_proba(y_pred_proba)
         if as_multiclass and (self.problem_type == BINARY):
@@ -262,7 +262,7 @@ class AbstractTabularLearner(AbstractLearner):
         for feature_generator in self.feature_generators:
             tic = time.time()
             X = feature_generator.transform(X)
-            print(f"+-[{(time.time() - tic)*1000.0:.0f} ms (learner.transform_features {feature_generator.transform})] ")
+            # print(f"+-[{(time.time() - tic)*1000.0:.0f} ms (learner.transform_features {feature_generator.transform})] ")
         return X
 
     def score(self, X: DataFrame, y=None, model=None):

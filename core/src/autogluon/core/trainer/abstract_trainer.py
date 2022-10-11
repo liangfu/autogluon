@@ -662,7 +662,7 @@ class AbstractTrainer:
             else:
                 tic = time.time()
                 model = self.load_model(model_name=model_name)
-                print(f"  +-[{(time.time() - tic)*1000.0:.0f} ms (trainer.get_model_pred_proba_dict.load_model)] ")
+                # print(f"  +-[{(time.time() - tic)*1000.0:.0f} ms (trainer.get_model_pred_proba_dict.load_model)] ")
 
                 tic = time.time()
                 if isinstance(model, StackerEnsembleModel):
@@ -670,7 +670,7 @@ class AbstractTrainer:
                     model_pred_proba_dict[model_name] = model.predict_proba(X, **preprocess_kwargs)
                 else:
                     model_pred_proba_dict[model_name] = model.predict_proba(X)
-                print(f"  +-[{(time.time() - tic)*1000.0:.0f} ms (trainer.get_model_pred_proba_dict.predict_proba)] ")
+                # print(f"  +-[{(time.time() - tic)*1000.0:.0f} ms (trainer.get_model_pred_proba_dict.predict_proba)] ")
 
             if record_pred_time:
                 time_end = time.time()
@@ -981,6 +981,8 @@ class AbstractTrainer:
         models = []
         for model_name in model_names:
             model = self.load_model(model_name)
+            if model_name not in ["WeightedEnsemble_L2"]:
+                model.compile()
             self.models[model.name] = model
             models.append(model)
 
@@ -1006,7 +1008,7 @@ class AbstractTrainer:
 
             tic = time.time()
             model = model_type.load(path=path, reset_paths=self.reset_paths)
-            print(f"  +---[{(time.time() - tic)*1000.0:.0f} ms (trainer.load_model.load {model_type.load})] ")
+            # print(f"  +---[{(time.time() - tic)*1000.0:.0f} ms (trainer.load_model.load {model_type.load})] ")
             return model
 
     def unpersist_models(self, model_names='all') -> list:
@@ -1704,11 +1706,11 @@ class AbstractTrainer:
 
         tic = time.time()
         X = self.get_inputs_to_model(model=model, X=X, model_pred_proba_dict=model_pred_proba_dict, fit=False)
-        print(f"  [{(time.time() - tic)*1000.0:.0f} ms (trainer.get_inputs_to_model)] ")
+        # print(f"  [{(time.time() - tic)*1000.0:.0f} ms (trainer.get_inputs_to_model)] ")
 
         tic = time.time()
         y_pred = model.predict_proba(X=X)
-        print(f"  [{(time.time() - tic)*1000.0:.0f} ms (trainer._predict_proba_model)] ")
+        # print(f"  [{(time.time() - tic)*1000.0:.0f} ms (trainer._predict_proba_model)] ")
         return y_pred
 
     def _get_dummy_stacker(self, level: int, model_levels: dict, use_orig_features=True) -> StackerEnsembleModel:
