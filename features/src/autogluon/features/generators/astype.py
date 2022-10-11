@@ -1,6 +1,8 @@
 import logging
 
 import numpy as np
+import pandas as pd
+import polars as pl
 from pandas import DataFrame
 
 from autogluon.common.features.types import R_INT, S_BOOL
@@ -69,7 +71,18 @@ class AsTypeFeatureGenerator(AbstractFeatureGenerator):
         self._int_features = np.array(self.feature_metadata_in.get_features(valid_raw_types=[R_INT]))
         return X, type_group_map_special
 
-    def _transform(self, X: DataFrame) -> DataFrame:
+    def _transform(self, X):
+        if isinstance(X, pd.DataFrame):
+            return self._transform_pd(X)
+        else:
+            return self._transform_pl(X)
+
+    def _transform_pl(self, X):
+        if self._bool_features:
+            for feature in self._bool_features:
+                X.select(pl.col(feature).apply(lambda x: int(x==self._bool_features[feature])))
+
+    def _transform_pd(self, X):
         if self._bool_features:
             for feature in self._bool_features:
                 X[feature] = (X[feature] == self._bool_features[feature]).astype(np.int8)

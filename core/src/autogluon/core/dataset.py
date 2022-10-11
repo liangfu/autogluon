@@ -1,5 +1,6 @@
 
 import pandas as pd
+import polars as pl
 
 from .utils.loaders import load_pd
 
@@ -49,7 +50,8 @@ class TabularDataset(pd.DataFrame):
         if isinstance(data, str):
             file_path = data
             data = load_pd.load(file_path)
+            super().__init__(data, **kwargs)
         else:
             file_path = None
-        super().__init__(data, **kwargs)
+            super().__init__(data, **kwargs)
         self.file_path = file_path

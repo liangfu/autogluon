@@ -2771,10 +2771,13 @@ class TabularPredictor:
 
     @staticmethod
     def __get_dataset(data):
+        import polars as pl
         if isinstance(data, TabularDataset):
             return data
         elif isinstance(data, pd.DataFrame):
             return TabularDataset(data)
+        elif isinstance(data, pl.DataFrame):
+            return data
         elif isinstance(data, str):
             return TabularDataset(data)
         elif isinstance(data, pd.Series):

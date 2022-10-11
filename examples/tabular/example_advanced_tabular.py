@@ -48,7 +48,10 @@ def benchmark(hyperparameters):
     # print(results["leaderboard"])
 
     # Inference time:
-    test_data = TabularDataset('https://autogluon.s3.amazonaws.com/datasets/Inc/test.csv')  # another Pandas DataFrame
+    # test_data = TabularDataset('https://autogluon.s3.amazonaws.com/datasets/Inc/test.csv')  # another Pandas DataFrame
+    import polars as pl
+    import pandas as pd
+    test_data = pd.read_csv("test.csv")
     # print(test_data.head())
 
     # perf = predictor.evaluate(test_data)  # shorthand way to evaluate our predictor if test-labels are available
@@ -78,13 +81,16 @@ def benchmark(hyperparameters):
             assert name in supported_compilers, f"unsupported base model {name}"
             model = trainer.load_model(name)
 
+        # Get feature generators
+        # feature_generators = predictor._learner.feature_generators[0].generators
+
         # Timing results for native compiler
         compiler = "native"
         model.params_aux['compiler'] = compiler
         model.compile()
         tic = time.time()
         print('--')
-        y_pred_native = predictor.predict_proba(test_data)
+        y_pred_native = predictor.predict_proba(test_data, as_pandas=False)
         print('--')
         print(f"{compiler} elapsed {(time.time() - tic)*1000.0:.0f} ms ({name})")
         
@@ -262,7 +268,7 @@ if __name__=="__main__":
         'KNN': {'ag_args_fit': {'compiler': 'native'}},
         'XT': {'ag_args_fit': {'compiler': 'native'}},
         'GBM': {'ag_args_fit': {'compiler': 'native'}},
-        # 'XGB': {'ag_args_fit': {'compiler': 'tvm'}},
+        # 'XGB': {'ag_args_fit': {'compiler': 'native'}},
         # 'CAT': {},
     }
     benchmark(hyperparameters)

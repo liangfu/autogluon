@@ -6,6 +6,8 @@ from collections import defaultdict
 from typing import Dict, List
 
 from pandas import DataFrame, Series
+import pandas as pd
+import polars as pl
 
 from autogluon.common.features.infer_types import get_type_map_raw, get_type_map_real, get_type_group_map_special
 from autogluon.common.features.feature_metadata import FeatureMetadata
@@ -292,7 +294,7 @@ class AbstractFeatureGenerator:
         """
         if not self._is_fit:
             raise AssertionError(f'{self.__class__.__name__} is not fit.')
-        if self.reset_index:
+        if self.reset_index and isinstance(X, DataFrame):
             X_index = copy.deepcopy(X.index)
             X = X.reset_index(drop=True)  # TODO: Theoretically inplace=True avoids data copy, but can lead to altering of original DataFrame outside of method context.
         else:
@@ -300,7 +302,10 @@ class AbstractFeatureGenerator:
         if self.column_names_as_str:
             X.columns = X.columns.astype(str)  # Ensure all column names are strings
         try:
-            X = X[self.features_in]
+            if isinstance(X, pd.DataFrame):
+                X = X[self.features_in]
+            else:
+                X = X.select(self.features_in)
         except KeyError:
             missing_cols = []
             for col in self.features_in:

@@ -127,7 +127,8 @@ class AbstractTabularLearner(AbstractLearner):
             X_index = copy.deepcopy(X.index)
         else:
             X_index = None
-        if X.empty:
+        # if X.empty:
+        if sum(X.shape) == 0:
             y_pred_proba = np.array([])
         else:
             if transform_features:
@@ -259,7 +260,9 @@ class AbstractTabularLearner(AbstractLearner):
 
     def transform_features(self, X):
         for feature_generator in self.feature_generators:
+            tic = time.time()
             X = feature_generator.transform(X)
+            print(f"+-[{(time.time() - tic)*1000.0:.0f} ms (learner.transform_features {feature_generator.transform})] ")
         return X
 
     def score(self, X: DataFrame, y=None, model=None):
