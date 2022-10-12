@@ -70,20 +70,10 @@ class LGBNativeCompiler:
 
     @staticmethod
     def compile(obj, path: str):
-        # import pdb
-        # pdb.set_trace()
         import lightgbm as lgb
-        # def get_sklearn_model(model):
-        #     if obj.problem_type == BINARY:
-        #         return lgb.LGBMClassifier(**model.params)
-        #     else:
-        #         raise NotImplementedError(f"problem type {obj.problem_type} not supported")
         if isinstance(obj.model, lgb.Booster):
             obj.model.save_model(path + 'model.txt', num_iteration=obj.model.best_iteration)
         else:
-            # import pdb
-            # pdb.set_trace()
-            # obj.save(path + 'model.txt', num_iteration=obj.model.best_iteration)
             model = lgb.Booster(model_file=path + 'model.txt')
             return model
         return obj.model

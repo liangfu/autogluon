@@ -98,12 +98,7 @@ def benchmark(hyperparameters):
             model.compile()
 
             # Otherwise we make predictions and can evaluate them later:
-            # tic = time.time()
-            # if compiler == "tvm" and name == "RandomForest":
-            #     import pdb
-            #     pdb.set_trace()
             # y_pred = predictor.predict_proba(test_data, model=name)
-            # print(f"elapsed {(time.time() - tic)*1000.0:.0f} ms for {hyperparameters}")
             tic = time.time()
             y_pred = predictor.predict_proba(test_data, model=name)
             print(f"{compiler} elapsed {(time.time() - tic)*1000.0:.0f} ms ({name})")
