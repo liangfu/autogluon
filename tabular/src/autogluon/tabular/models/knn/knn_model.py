@@ -155,6 +155,7 @@ class KNNOnnxCompiler:
 class KNNTVMCompiler:
     name = 'tvm'
     save_in_pkl = False
+    batch_size = 1024
 
     @staticmethod
     def can_compile():
@@ -172,22 +173,23 @@ class KNNTVMCompiler:
     @staticmethod
     def load(obj, path: str):
         compiler = obj._compiler.name
-        model = KNNNativeCompiler.load(obj, path)
+        model = RFNativeCompiler.load(obj, path)
         from hummingbird.ml import convert as hb_convert
         import os
-        batch_size = 5120
+        batch_size = obj._compiler.batch_size
+        model_path = path + f"model_{compiler}_b{batch_size}"
         input_shape = (batch_size, obj._num_features_post_process)
-        if os.path.exists(path + f"model_{compiler}.zip"):
+        if os.path.exists(model_path + ".zip"):
             from hummingbird.ml import load as hb_load
-            tvm_model = hb_load(path + f"model_{compiler}")
+            tvm_model = hb_load(model_path)
         else:
             if compiler == "tvm":
                 print("Building TVM model, this may take a few minutes...")
             test_input = np.random.rand(*input_shape)
             tvm_model = hb_convert(model, compiler, test_input = test_input, extra_config={
-                "batch_size": batch_size, "test_input": test_input})
-            tvm_model.save(path + f"model_{compiler}")
-        model = KNNTVMPredictor(model=tvm_model)
+                "batch_size": batch_size, "test_input": test_input, "tvm_max_fuse_depth": 8})
+            tvm_model.save(model_path)
+        model = RFTVMPredictor(model=tvm_model)
         return model
 
 class KNNPyTorchCompiler(KNNTVMCompiler):
@@ -307,6 +309,7 @@ class KNNModel(AbstractModel):
 
     def _get_compiler(self):
         compiler = self.params_aux.get('compiler', None)
+        batch_size = self.params_aux.get('compiler.batch_size', 1024)
         compilers = self._valid_compilers()
         compiler_names = {c.name: c for c in compilers}
         if compiler is not None and compiler not in compiler_names:
@@ -314,6 +317,7 @@ class KNNModel(AbstractModel):
         if compiler is None:
             return KNNOnnxCompiler
         compiler_cls = compiler_names[compiler]
+        compiler_cls.batch_size = batch_size
         if not compiler_cls.can_compile():
             compiler_cls = KNNNativeCompiler
         return compiler_cls

@@ -153,7 +153,7 @@ class LGBModelTVMCompiler:
         y_pred_ref = model.predict(X)
 
         from hummingbird.ml import convert as hb_convert
-        batch_size = 5120
+        batch_size = 512
         input_shape = (batch_size, model.num_feature())
         test_input = np.random.rand(*input_shape)
         tvm_model = hb_convert(model, compiler, test_input=test_input, extra_config={
