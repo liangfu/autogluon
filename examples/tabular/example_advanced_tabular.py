@@ -9,6 +9,7 @@ from autogluon.tabular.configs.hyperparameter_configs import get_hyperparameter_
 import time
 from numpy.testing import assert_allclose
 import warnings
+import numpy as np
 
 from autogluon.core.models.ensemble.weighted_ensemble_model import WeightedEnsembleModel
 from autogluon.tabular.models.tabular_nn.torch.tabular_nn_torch import TabularNeuralNetTorchModel
@@ -52,6 +53,7 @@ def benchmark(hyperparameters):
     import polars as pl
     import pandas as pd
     test_data = pd.read_csv("test.csv")
+    # test_data = test_data.head(100)
     # print(test_data.head())
 
     # perf = predictor.evaluate(test_data)  # shorthand way to evaluate our predictor if test-labels are available
@@ -64,10 +66,12 @@ def benchmark(hyperparameters):
     predictor.persist_models(models='all')
 
     supported_compilers = {
-        "KNeighbors":   ["onnx", "pytorch"],
-        "RandomForest": ["pytorch", "tvm"], # ["onnx", "pytorch", "tvm"],
-        "ExtraTrees":   ["pytorch", "tvm"], # ["onnx", "pytorch", "tvm"],
-        "LightGBM":     ["lleaves"], # , "pytorch", "tvm"],
+        # "KNeighbors":   ["native", "onnx", "pytorch"],
+        "KNeighbors":   ["pytorch"],
+        # "RandomForest": ["native", "onnx", "pytorch", "tvm"],
+        "RandomForest": ["onnx", "pytorch", "tvm"],
+        "ExtraTrees":   ["native", "onnx", "pytorch", "tvm"],
+        "LightGBM":     ["native", "lleaves"], # , "pytorch", "tvm"],
         # "XGB": ["pytorch", "tvm"],
         # "NN_TORCH": ["pytorch", "tvm"],
     }
@@ -97,15 +101,22 @@ def benchmark(hyperparameters):
             model.params_aux['compiler'] = compiler
             for batch_size in [1, 100, 10000]:
                 model.params_aux['compiler.batch_size'] = batch_size
-
+                
+                print(f"compiling {name} with {compiler} with batch size {batch_size}...")
                 tic = time.time()
                 model.compile()
                 compile_time = time.time() - tic
 
                 # Otherwise we make predictions and can evaluate them later:
                 # y_pred = predictor.predict_proba(test_data, model=name)
+                print(f"profiling {name} with {compiler} with batch size {batch_size}...")
                 tic = time.time()
-                y_pred = predictor.predict_proba(test_data, model=name)
+                y_pred = []
+                # batching via groupby
+                for batch_id, batch_df in test_data.groupby(np.arange(len(test_data)) // batch_size):
+                    y_pred_batch = predictor.predict_proba(batch_df, model=name)
+                    y_pred.append(y_pred_batch)
+                y_pred = np.concatenate(y_pred)
                 print(f"{compiler} elapsed {(time.time() - tic)*1000.0:.0f} ms (+ {compile_time*1000.0:.0f} ms) "
                       f"for {name}, batch_size={batch_size}")
 
@@ -122,10 +133,10 @@ def benchmark(hyperparameters):
 if __name__=="__main__":
     hyperparameters = {
         # 'NN_TORCH': {'ag_args_fit': {'compiler': 'native'}},
-        'RF': {'ag_args_fit': {'compiler': 'native'}},
+        # 'RF': {'ag_args_fit': {'compiler': 'native'}},
         # 'KNN': {'ag_args_fit': {'compiler': 'native'}},
         # 'XT': {'ag_args_fit': {'compiler': 'native'}},
-        # 'GBM': {'ag_args_fit': {'compiler': 'native'}},
+        'GBM': {'ag_args_fit': {'compiler': 'native'}},
         # 'XGB': {'ag_args_fit': {'compiler': 'native'}},
         # 'CAT': {},
     }

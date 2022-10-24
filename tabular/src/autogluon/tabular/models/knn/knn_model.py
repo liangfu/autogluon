@@ -173,7 +173,7 @@ class KNNTVMCompiler:
     @staticmethod
     def load(obj, path: str):
         compiler = obj._compiler.name
-        model = RFNativeCompiler.load(obj, path)
+        model = KNNNativeCompiler.load(obj, path)
         from hummingbird.ml import convert as hb_convert
         import os
         batch_size = obj._compiler.batch_size
@@ -189,7 +189,7 @@ class KNNTVMCompiler:
             tvm_model = hb_convert(model, compiler, test_input = test_input, extra_config={
                 "batch_size": batch_size, "test_input": test_input, "tvm_max_fuse_depth": 8})
             tvm_model.save(model_path)
-        model = RFTVMPredictor(model=tvm_model)
+        model = KNNTVMPredictor(model=tvm_model)
         return model
 
 class KNNPyTorchCompiler(KNNTVMCompiler):
