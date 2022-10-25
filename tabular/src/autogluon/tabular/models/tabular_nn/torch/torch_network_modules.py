@@ -152,7 +152,7 @@ class EmbedNet(nn.Module):
             if hasattr(layer, 'reset_parameters'):
                 layer.reset_parameters()
 
-    def forward(self, data_batch):
+    def get_input_as_vector(self, data_batch):
         input_data = []
         if self.has_vector_features:
             input_data.append(data_batch['vector'].to(self.device))
@@ -165,7 +165,9 @@ class EmbedNet(nn.Module):
             input_data = torch.cat(input_data, dim=1)
         else:
             input_data = input_data[0]
+        return input_data
 
+    def forward(self, input_data):
         output_data = self.main_block(input_data)
         if self.problem_type in [REGRESSION, QUANTILE]:  # output with y-range
             if self.y_constraint is None:
@@ -226,7 +228,7 @@ class EmbedNet(nn.Module):
     def compute_loss(self, data_batch, loss_function=None, gamma=None):
         # train mode
         self.train()
-        predict_data = self(data_batch)
+        predict_data = self(self.get_input_as_vector(data_batch))
         target_data = data_batch['label'].to(self.device)
         if self.problem_type in [BINARY, MULTICLASS]:
             target_data = target_data.type(torch.long)  # Windows default int type is int32. Need to explicit convert to Long.
@@ -244,7 +246,7 @@ class EmbedNet(nn.Module):
     def predict(self, input_data):
         self.eval()
         with torch.no_grad():
-            predict_data = self(input_data)
+            predict_data = self(self.get_input_as_vector(input_data))
             if self.problem_type == QUANTILE:
                 predict_data = torch.sort(predict_data, -1)[0]  # sorting ensures monotonicity of quantile estimates
             elif self.problem_type in [BINARY, MULTICLASS, SOFTCLASS]:
