@@ -433,12 +433,14 @@ class TabularNeuralNetTorchModel(AbstractNeuralNetworkModel):
         if not isinstance(new_data, TabularTorchDataset):
             raise ValueError("new_data must of of type TabularTorchDataset if process=False")
         # val_dataloader = new_data.build_loader(self.max_batch_size, self.num_dataloading_workers, is_test=True)
-        val_dataloader = new_data.build_loader(self.max_batch_size, 8, is_test=True)
+        val_dataloader = new_data.build_loader(self.max_batch_size, 2, is_test=True)
         print(f"elapsed (build_loader): {(time.time()-tic)*1000:.0f} ms workers={self.num_dataloading_workers}")
         preds_dataset = []
         for batch_idx, data_batch in enumerate(val_dataloader):
+            tik = time.time()
             preds_batch = self.model.predict(data_batch)
             preds_dataset.append(preds_batch)
+            print(f"elapsed (subtotal): {(time.time()-tik)*1000:.0f} ms")
         preds_dataset = np.concatenate(preds_dataset, 0)
         print(f"elapsed (total): {(time.time()-tic)*1000:.0f} ms")
         return preds_dataset
@@ -575,13 +577,12 @@ class TabularNeuralNetTorchModel(AbstractNeuralNetworkModel):
 
     def _get_input_types(self, batch_size=None) -> list:
         """Get input types as a list of tuples, containining shape and dtype."""
-        input_types = []
+        feature_dims = 0
         if self.model.has_vector_features:
-            input_types = [((batch_size, self.model.architecture_desc['vector_dims']), np.float32)]
+            feature_dims = self.model.architecture_desc['vector_dims']
         if self.model.has_embed_features:
-            embed_dims = self.model.architecture_desc['embed_dims']
-            for embed_dim in embed_dims:
-                input_types.append(((batch_size, embed_dim), np.int32))
+            feature_dims += sum(self.model.architecture_desc['embed_dims'])
+        input_types = [((batch_size, feature_dims), np.float32)]
         return input_types
 
     def _valid_compilers(self):

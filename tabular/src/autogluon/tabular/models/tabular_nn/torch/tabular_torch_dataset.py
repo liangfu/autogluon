@@ -123,6 +123,8 @@ class TabularTorchDataset(torch.utils.data.Dataset):
         self.num_categories_per_embedfeature = self.getNumCategoriesEmbeddings()
 
     def __getitem__(self, idx):
+        import time
+        tic = time.time()
         output_dict = {}
         if self.has_vector_features():
             output_dict['vector'] = self.data_list[self.vectordata_index][idx]
@@ -132,6 +134,7 @@ class TabularTorchDataset(torch.utils.data.Dataset):
                 output_dict['embed'].append(self.data_list[i][idx])
         if self.label_index is not None:
             output_dict['label'] = self.data_list[self.label_index][idx]
+        # print(f"elapsed (getitem): {(time.time()-tic)*1000:.0f} ms")
         return output_dict
 
     def __len__(self):

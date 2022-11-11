@@ -155,24 +155,19 @@ class EmbedNet(nn.Module):
     def _get_input_vector(self, data_batch : dict) -> list:
         input_data = []
         if self.has_vector_features:
-            input_data.append(data_batch['vector'].to(self.device))
+            input_data.append(data_batch['vector'])
         if self.has_embed_features:
-            input_data += data_batch['embed']
-        return input_data
-
-    def forward(self, *input_data):
-        if not isinstance(input_data[0], torch.Tensor):
-            input_data = input_data[0]
-        input_data = list(input_data)
-        if self.has_embed_features:
-            # vector features would potentially take the first tensor
-            offset = 1 if self.has_vector_features else 0
+            if len(self.embed_blocks) != len(data_batch['embed']):
+                raise ValueError("input data size doesn't match number of embed blocks.")
             for i in range(len(self.embed_blocks)):
-                input_data[offset+i] = self.embed_blocks[i](input_data[offset+i].to(self.device))
+                input_data.append(self.embed_blocks[i](data_batch['embed'][i]))
         if len(input_data) > 1:
             input_data = torch.cat(input_data, dim=1)
         else:
             input_data = input_data[0]
+        return input_data
+
+    def forward(self, input_data):
         output_data = self.main_block(input_data)
         if self.problem_type in [REGRESSION, QUANTILE]:  # output with y-range
             if self.y_constraint is None:

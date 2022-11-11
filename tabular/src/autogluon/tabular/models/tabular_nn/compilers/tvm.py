@@ -1,5 +1,7 @@
 import os
 import numpy as np
+import torch
+import torch.nn as nn
 
 from autogluon.core.constants import BINARY, MULTICLASS, REGRESSION, SOFTCLASS, QUANTILE
 
@@ -43,40 +45,55 @@ class TabularNeuralNetTorchTvmPredictor:
         self.problem_type = architecture_desc.get("problem_type", None)
         self.architecture_desc = architecture_desc
 
+        if self.has_embed_features:
+            num_categs_per_feature = architecture_desc['num_categs_per_feature']
+            embed_dims = architecture_desc['embed_dims']
+            self.embed_blocks = nn.ModuleList()
+            for i in range(len(num_categs_per_feature)):
+                self.embed_blocks.append(nn.Embedding(num_embeddings=num_categs_per_feature[i],
+                                                      embedding_dim=embed_dims[i]))
+
     def _get_input_vector(self, data_batch : dict) -> list:
         input_data = []
         if self.has_vector_features:
             input_data.append(data_batch['vector'].numpy())
         if self.has_embed_features:
-            embed_data = data_batch['embed']
-            input_data += [d.numpy() for d in embed_data]
+            if len(self.embed_blocks) != len(data_batch['embed']):
+                raise ValueError("input data size doesn't match number of embed blocks.")
+            with torch.no_grad():
+                for i in range(len(self.embed_blocks)):
+                    input_data.append(self.embed_blocks[i](data_batch['embed'][i]).numpy())
+        if len(input_data) > 1:
+            input_data = np.concatenate(input_data, axis=1)
+        else:
+            input_data = input_data[0]
         return input_data
 
     def predict(self, X):
         """Run the model with the input and return the result."""
         import tvm
         import time
+        tic = time.time()
         input_data = self._get_input_vector(X)
         num_net_outputs = self.architecture_desc['num_net_outputs']
-        data_size = input_data[0].shape[0]
+        data_size = input_data.shape[0]
         batch_size = self.batch_size
         out_shape = (batch_size, num_net_outputs)
 
         # Pad the batch if input data is small
         if data_size < batch_size:
-            for i, data in enumerate(input_data):
-                pad_shape = list(data.shape)
-                pad_shape[0] = batch_size - data_size
-                pad_data = np.zeros(tuple(pad_shape))
-                input_data[i] = np.concatenate([input_data[i], pad_data])
+            pad_shape = list(input_data.shape)
+            pad_shape[0] = batch_size - data_size
+            pad_data = np.zeros(tuple(pad_shape))
+            input_data = np.concatenate([input_data, pad_data], axis=0)
         if data_size > batch_size:
             raise RuntimeError("Input data size is larger than expected. "
                                f"Try use DataLoader with batch_size={batch_size}.")
+        print(f"elapsed (embed): {(time.time()-tic)*1000:.0f} ms")
 
         # Run on graph executor
         tic = time.time()
-        for i, v in enumerate(input_data):
-            self.module.set_input(f"input{i}", v)
+        self.module.set_input(f"input0", input_data)
         self.module.run()
         predict_data = self.module.get_output(0, tvm.nd.empty(out_shape)).numpy()
         print(f"elapsed (run): {(time.time()-tic)*1000:.0f} ms")
