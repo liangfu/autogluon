@@ -425,17 +425,22 @@ class TabularNeuralNetTorchModel(AbstractNeuralNetworkModel):
             raise ValueError("X must be of type pd.DataFrame or TabularTorchDataset, not type: %s" % type(X))
 
     def _predict_tabular_data(self, new_data, process=True):
+        import time
+        tic = time.time()
         from .tabular_torch_dataset import TabularTorchDataset
         if process:
             new_data = self._process_test_data(new_data)
         if not isinstance(new_data, TabularTorchDataset):
             raise ValueError("new_data must of of type TabularTorchDataset if process=False")
-        val_dataloader = new_data.build_loader(self.max_batch_size, self.num_dataloading_workers, is_test=True)
+        # val_dataloader = new_data.build_loader(self.max_batch_size, self.num_dataloading_workers, is_test=True)
+        val_dataloader = new_data.build_loader(self.max_batch_size, 8, is_test=True)
+        print(f"elapsed (build_loader): {(time.time()-tic)*1000:.0f} ms workers={self.num_dataloading_workers}")
         preds_dataset = []
         for batch_idx, data_batch in enumerate(val_dataloader):
             preds_batch = self.model.predict(data_batch)
             preds_dataset.append(preds_batch)
         preds_dataset = np.concatenate(preds_dataset, 0)
+        print(f"elapsed (total): {(time.time()-tic)*1000:.0f} ms")
         return preds_dataset
 
     def _generate_datasets(self, X, y, params, X_val=None, y_val=None):
@@ -589,8 +594,9 @@ class TabularNeuralNetTorchModel(AbstractNeuralNetworkModel):
     def compile(self, compiler_configs=None):
         if compiler_configs is None:
             compiler_configs = {}
-        super().compile(compiler_configs=compiler_configs)
         batch_size = compiler_configs.get("batch_size", self.max_batch_size)
+        compiler_configs.update(batch_size=batch_size)
+        super().compile(compiler_configs=compiler_configs)
         if self._compiler is not None:
             self.max_batch_size = batch_size
 

@@ -55,6 +55,7 @@ class TabularNeuralNetTorchTvmPredictor:
     def predict(self, X):
         """Run the model with the input and return the result."""
         import tvm
+        import time
         input_data = self._get_input_vector(X)
         num_net_outputs = self.architecture_desc['num_net_outputs']
         data_size = input_data[0].shape[0]
@@ -73,10 +74,12 @@ class TabularNeuralNetTorchTvmPredictor:
                                f"Try use DataLoader with batch_size={batch_size}.")
 
         # Run on graph executor
+        tic = time.time()
         for i, v in enumerate(input_data):
             self.module.set_input(f"input{i}", v)
         self.module.run()
         predict_data = self.module.get_output(0, tvm.nd.empty(out_shape)).numpy()
+        print(f"elapsed (run): {(time.time()-tic)*1000:.0f} ms")
 
         # Remove padded result from output
         if data_size < batch_size:
@@ -131,7 +134,8 @@ class TabularNeuralNetTorchTvmCompiler:
         """
         import torch
         import tvm
-        from tvm import relay
+        from tvm import relay, auto_scheduler
+        from tvm.topi.sparse.utils import sparse_sketch_rules
         if input_types is None or not isinstance(input_types[0], tuple):
             raise RuntimeError("input_types argument should contain at least one tuple"
                                ", e.g. [((1, 14), np.float32)]")
@@ -154,6 +158,20 @@ class TabularNeuralNetTorchTvmCompiler:
 
         target = tvm.target.Target("llvm", host="llvm")
         dev = tvm.cpu(0)
+
+        # log_file = path + "log.txt"
+        # tasks, task_weights = auto_scheduler.extract_tasks(mod["main"], params, target)
+        # tuner = auto_scheduler.TaskScheduler(tasks, task_weights)
+        # tune_option = auto_scheduler.TuningOptions(
+        #     num_measure_trials=len(tasks)*2,  # change this to 20000 to achieve the best performance
+        #     runner=auto_scheduler.LocalRunner(repeat=6, enable_cpu_cache_flush=True),
+        #     measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
+        #     verbose=0,
+        # )
+        # tuner.tune(tune_option)
+        # with auto_scheduler.ApplyHistoryBest(log_file):
+        #     with tvm.transform.PassContext(opt_level=3, config={"relay.backend.use_auto_scheduler": True}):
+        #         lib = relay.build(mod, target=target, params=params)
         with tvm.transform.PassContext(opt_level=3):
             lib = relay.build(mod, target=target, params=params)
 
