@@ -398,12 +398,15 @@ class TabularNeuralNetTorchModel(AbstractNeuralNetworkModel):
     #  If this isn't here, inference speed is slowed down massively.
     #  Remove once upgraded to XGBoost>=1.6
     def _predict_proba(self, X, _reset_threads=True, **kwargs):
+        import time
+        tic = time.time()
         if _reset_threads:
             from ..._utils.torch_utils import TorchThreadManager
             with TorchThreadManager(num_threads=self._num_cpus_infer):
                 pred_proba = self._predict_proba_internal(X=X, **kwargs)
         else:
             pred_proba = self._predict_proba_internal(X=X, **kwargs)
+        print(f"elapsed (_predict_proba): {(time.time()-tic)*1000:.0f} ms (_reset_threads={_reset_threads})")
         return pred_proba
 
     def _predict_proba_internal(self, X, **kwargs):
@@ -417,22 +420,38 @@ class TabularNeuralNetTorchModel(AbstractNeuralNetworkModel):
         if isinstance(X, TabularTorchDataset):
             return self._predict_tabular_data(new_data=X, process=False)
         elif isinstance(X, pd.DataFrame):
+            import time
+            tic = time.time()
             X = self.preprocess(X, **kwargs)
-            return self._predict_tabular_data(new_data=X, process=True)
+            ret = self._predict_tabular_data(new_data=X, process=True)
+            print(f"elapsed (_predict_tabular_data): {(time.time()-tic)*1000:.0f} ms")
+            return ret
         else:
             raise ValueError("X must be of type pd.DataFrame or TabularTorchDataset, not type: %s" % type(X))
 
     def _predict_tabular_data(self, new_data, process=True):
+        import time
+        tic = time.time()
         from .tabular_torch_dataset import TabularTorchDataset
         if process:
             new_data = self._process_test_data(new_data)
         if not isinstance(new_data, TabularTorchDataset):
             raise ValueError("new_data must of of type TabularTorchDataset if process=False")
+        print(f"elapsed (process_test_data): {(time.time()-tic)*1000:.0f} ms")
+        tic = time.time()
         val_dataloader = new_data.build_loader(self.max_batch_size, self.num_dataloading_workers, is_test=True)
         preds_dataset = []
+        print(f"elapsed (build_loader): {(time.time()-tic)*1000:.0f} ms")
+        tic = time.time()
+        subtotal = 0
         for batch_idx, data_batch in enumerate(val_dataloader):
+            tik = time.time()
             preds_batch = self.model.predict(data_batch)
             preds_dataset.append(preds_batch)
+            subtotal += time.time() - tik
+        total = time.time()-tic
+        print(f"elapsed (dataloader): {(total-subtotal)*1000:.0f} ms")
+        print(f"elapsed (predict): {subtotal*1000:.0f} ms")
         preds_dataset = np.concatenate(preds_dataset, 0)
         return preds_dataset
 
@@ -473,6 +492,7 @@ class TabularNeuralNetTorchModel(AbstractNeuralNetworkModel):
             Returns:
                 Dataset object
         """
+        import time
         from .tabular_torch_dataset import TabularTorchDataset
 
         # sklearn processing n_quantiles warning
@@ -482,14 +502,22 @@ class TabularNeuralNetTorchModel(AbstractNeuralNetworkModel):
         if (self.processor is None or self._types_of_features is None
            or self.feature_arraycol_map is None or self.feature_type_map is None):
             raise ValueError("Need to process training data before test data")
+        tic = time.time()
         if self.features_to_drop:
             drop_cols = [col for col in df.columns if col in self.features_to_drop]
             if drop_cols:
                 df = df.drop(columns=drop_cols)
+        print(f"> elapsed (features_to_drop): {(time.time()-tic)*1000:.0f} ms")
 
         # self.feature_arraycol_map, self.feature_type_map have been previously set while processing training data.
+        tic = time.time()
         df = self.processor.transform(df)
-        return TabularTorchDataset(df, self.feature_arraycol_map, self.feature_type_map, self.problem_type, labels)
+        print(f"> elapsed (transform): {(time.time()-tic)*1000:.0f} ms")
+
+        tic = time.time()
+        dataset = TabularTorchDataset(df, self.feature_arraycol_map, self.feature_type_map, self.problem_type, labels)
+        print(f"> elapsed (TabularTorchDataset): {(time.time()-tic)*1000:.0f} ms")
+        return dataset
 
     def _process_train_data(self, df, impute_strategy, max_category_levels, skew_threshold,
                             embed_min_categories, use_ngram_features, labels):
