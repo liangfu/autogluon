@@ -210,6 +210,11 @@ class AbstractModel:
         """Returns True if the model can be fit."""
         return not self.is_fit()
 
+    def is_compiled(self) -> bool:
+        """Returns True if the model has been compiled."""
+        if not self.is_fit():
+            return False
+
     # TODO: v0.1 update to be aligned with _set_default_auxiliary_params(), add _get_default_params()
     def _set_default_params(self):
         pass

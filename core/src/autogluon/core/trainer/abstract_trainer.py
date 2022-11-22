@@ -1185,9 +1185,10 @@ class AbstractTrainer:
 
             # Check if already compiled, or if can't compile due to missing dependencies,
             # or if model hasn't implemented compiling.
-            if 'compiler' in config and model.get_compiler_name() == config['compiler']:
-                logger.log(20, f'Skipping compilation for {model_name} ... (Already compiled with "{model.get_compiler_name()}" backend)')
-            elif model.can_compile(compiler_configs=config):
+            # if 'compiler' in config and model.get_compiler_name() == config['compiler']:
+            #     logger.log(20, f'Skipping compilation for {model_name} ... (Already compiled with "{model.get_compiler_name()}" backend)')
+            # elif model.can_compile(compiler_configs=config):
+            if model.can_compile(compiler_configs=config):
                 logger.log(20, f'Compiling model: {model.name} ... Config = {config}')
                 compile_start_time = time.time()
                 model.compile(compiler_configs=config)

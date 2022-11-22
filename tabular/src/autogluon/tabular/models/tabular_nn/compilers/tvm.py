@@ -136,12 +136,12 @@ class TabularNeuralNetTorchTvmCompiler:
         import torch
         import tvm
         from tvm import relay, auto_scheduler
-        from tvm.topi.sparse.utils import sparse_sketch_rules
+        from .native import TabularNeuralNetTorchNativeCompiler
         if input_types is None or not isinstance(input_types[0], tuple):
             raise RuntimeError("input_types argument should contain at least one tuple"
                                ", e.g. [((1, 14), np.float32)]")
         if isinstance(model, TabularNeuralNetTorchTvmPredictor):
-            return model
+            model = model._native_model
 
         input_data = []
         for shape, dtype in input_types:
@@ -159,8 +159,8 @@ class TabularNeuralNetTorchTvmCompiler:
 
         target = tvm.target.Target("llvm", host="llvm")
         dev = tvm.cpu(0)
-        log_file = path + "log.txt"
 
+        log_file = path + "log.txt"
         tasks, task_weights = auto_scheduler.extract_tasks(mod["main"], params, target)
         tuner = auto_scheduler.TaskScheduler(tasks, task_weights)
         tune_option = auto_scheduler.TuningOptions(
@@ -174,8 +174,15 @@ class TabularNeuralNetTorchTvmCompiler:
             with tvm.transform.PassContext(opt_level=3, config={"relay.backend.use_auto_scheduler": True}):
                 lib = relay.build(mod, target=target, params=params)
 
+        # with tvm.transform.PassContext(opt_level=3):
+        #     lib = relay.build(mod, target=target, params=params)
+
         model.architecture_desc['problem_type'] = model.problem_type
         TabularNeuralNetTorchTvmCompiler.save(lib, path, model.architecture_desc)
+
+        # Save native model to load it in the tvm predictor,
+        # in order to support refit_full and recompiling with a different batch_size.
+        TabularNeuralNetTorchNativeCompiler.save(model, path)
 
     @staticmethod
     def save(model, path: str, architecture_desc : dict = None) -> str:
@@ -194,9 +201,13 @@ class TabularNeuralNetTorchTvmCompiler:
     def load(path: str) -> TabularNeuralNetTorchTvmPredictor:
         """Load from the path that contains an tvm file."""
         import tvm, json
+        from .native import TabularNeuralNetTorchNativeCompiler
         path_lib = path + "model_tvm.tar"
         loaded_lib = tvm.runtime.load_module(path_lib)
         with open(path + "model_architecture_desc.json", "rt") as fp:
             architecture_desc = json.load(fp)
-        return TabularNeuralNetTorchTvmPredictor(model=loaded_lib,
-                                                 architecture_desc=architecture_desc)
+        native_model = TabularNeuralNetTorchNativeCompiler.load(path)
+        predictor = TabularNeuralNetTorchTvmPredictor(model=loaded_lib,
+                                                      architecture_desc=architecture_desc)
+        predictor._native_model = native_model
+        return predictor

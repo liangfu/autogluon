@@ -6,7 +6,8 @@ def get_model_true_infer_speed_per_row_batch(
         predictor,
         batch_size: int = 100000,
         repeats=1,
-        silent=False):
+        silent=False,
+        models='all'):
     """
     Get per-model true inference speed per row for a given batch size of data.
 
@@ -55,7 +56,7 @@ def get_model_true_infer_speed_per_row_batch(
     if len_data != batch_size:
         raise AssertionError(f'len(data_batch) must equal batch_size! ({len_data} != {batch_size})')
 
-    predictor.persist_models(models='all')
+    predictor.persist_models(models=models)
 
     ts = time.time()
     for i in range(repeats):

@@ -590,10 +590,24 @@ class TabularNeuralNetTorchModel(AbstractNeuralNetworkModel):
     def _default_compiler(self):
         return TabularNeuralNetTorchNativeCompiler
 
+    def is_compiled(self) -> bool:
+        """Returns True if the model has been compiled."""
+        if not super().is_compiled():
+            return False
+        try_import_torch()
+        import torch.nn as nn
+        if isinstance(self.model, nn.Module):
+            # The compilation process would return a predictor that is
+            # independent from torch.nn.Module.
+            return False
+        return True
+
     def compile(self, compiler_configs=None):
         if compiler_configs is None:
             compiler_configs = {}
-        batch_size = compiler_configs.get("batch_size", self.max_batch_size)
+        batch_size = compiler_configs.get("batch_size", None) # self.max_batch_size)
+        if batch_size is not None:
+            batch_size = min(self.max_batch_size, batch_size)
         compiler_configs.update(batch_size=batch_size)
         super().compile(compiler_configs=compiler_configs)
         if self._compiler is not None:
