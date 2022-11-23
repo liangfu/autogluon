@@ -136,8 +136,11 @@ class AbstractTabularLearner(AbstractLearner):
         if X.empty:
             y_pred_proba = np.array([])
         else:
+            import time
+            tic = time.time()
             if transform_features:
                 X = self.transform_features(X)
+            print(f"elapsed (transform_features): {(time.time()-tic)*1000:.0f} ms")
             y_pred_proba = self.load_trainer().predict_proba(X, model=model)
         if inverse_transform:
             y_pred_proba = self.label_cleaner.inverse_transform_proba(y_pred_proba)

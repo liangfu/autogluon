@@ -411,17 +411,24 @@ class TabularNeuralNetTorchModel(AbstractNeuralNetworkModel):
             raise ValueError("X must be of type pd.DataFrame or TabularTorchDataset, not type: %s" % type(X))
 
     def _predict_tabular_data(self, new_data, process=True):
+        import pdb
+        pdb.set_trace()
+        import time
         from .tabular_torch_dataset import TabularTorchDataset
+        tic = time.time()
         if process:
             new_data = self._process_test_data(new_data)
         if not isinstance(new_data, TabularTorchDataset):
             raise ValueError("new_data must of of type TabularTorchDataset if process=False")
+        print(f"elapsed (process): {(time.time()-tic)*1000:.0f} ms")
+        tic = time.time()
         val_dataloader = new_data.build_loader(self.max_batch_size, self.num_dataloading_workers, is_test=True)
         preds_dataset = []
         for batch_idx, data_batch in enumerate(val_dataloader):
             preds_batch = self.model.predict(data_batch)
             preds_dataset.append(preds_batch)
         preds_dataset = np.concatenate(preds_dataset, 0)
+        print(f"elapsed (predict): {(time.time()-tic)*1000:.0f} ms")
         return preds_dataset
 
     def _generate_datasets(self, X, y, params, X_val=None, y_val=None):
@@ -476,8 +483,14 @@ class TabularNeuralNetTorchModel(AbstractNeuralNetworkModel):
                 df = df.drop(columns=drop_cols)
 
         # self.feature_arraycol_map, self.feature_type_map have been previously set while processing training data.
+        import time
+        tic = time.time()
         df = self.processor.transform(df)
-        return TabularTorchDataset(df, self.feature_arraycol_map, self.feature_type_map, self.problem_type, labels)
+        print(f"elapsed (transform): {(time.time()-tic)*1000:.0f} ms")
+        tic = time.time()
+        dataset = TabularTorchDataset(df, self.feature_arraycol_map, self.feature_type_map, self.problem_type, labels)
+        print(f"elapsed (dataset): {(time.time()-tic)*1000:.0f} ms")
+        return dataset
 
     def _process_train_data(self, df, impute_strategy, max_category_levels, skew_threshold,
                             embed_min_categories, use_ngram_features, labels):
