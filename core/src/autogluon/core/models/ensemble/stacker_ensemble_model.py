@@ -117,8 +117,11 @@ class StackerEnsembleModel(BaggedEnsembleModel):
                     elif model_pred_proba_dict and base_model_name in model_pred_proba_dict:
                         y_pred_proba = model_pred_proba_dict[base_model_name]
                     else:
+                        import time
+                        tic = time.time()
                         base_model = self.load_base_model(base_model_name)
                         y_pred_proba = base_model.predict_proba(X)
+                        print(f"elapsed ({base_model_name}): {(time.time()-tic)*1000:.1f} ms")
                     X_stacker.append(y_pred_proba)  # TODO: This could get very large on a high class count problem. Consider capping to top N most frequent classes and merging least frequent
                 X_stacker = self.pred_probas_to_df(X_stacker, index=X.index)
                 if self.params['use_orig_features']:

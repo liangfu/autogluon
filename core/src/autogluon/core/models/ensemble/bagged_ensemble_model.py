@@ -318,12 +318,15 @@ class BaggedEnsembleModel(AbstractModel):
             raise ValueError(f'k_fold must equal previously fit k_fold value for the current n_repeat, values: (({k_fold}, {self._k})')
 
     def predict_proba(self, X, normalize=None, **kwargs):
+        import time
+        tic = time.time()
         model = self.load_child(self.models[0])
         X = self.preprocess(X, model=model, **kwargs)
         pred_proba = model.predict_proba(X=X, preprocess_nonadaptive=False, normalize=normalize)
         for model in self.models[1:]:
             model = self.load_child(model)
             pred_proba += model.predict_proba(X=X, preprocess_nonadaptive=False, normalize=normalize)
+        print(f"elapsed ({type(model)}): {(time.time()-tic)*1000:.1f} ms")
         pred_proba = pred_proba / len(self.models)
 
         if self.params_aux.get("temperature_scalar", None) is not None:
