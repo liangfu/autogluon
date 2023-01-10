@@ -62,7 +62,10 @@ extras_require = {
         'onnxruntime>=1.13.0,<1.14.0'
     ] if sys.platform == 'darwin' else [
         'skl2onnx>=1.13.0,<1.14.0'
-    ]
+    ],
+    'onnxmltools': [
+        'onnxmltools>=1.11.1,<1.12.0',
+    ],
 }
 
 all_requires = []
@@ -74,7 +77,7 @@ extras_require['all'] = all_requires
 
 
 test_requires = []
-for test_package in ['imodels', 'vowpalwabbit', 'skl2onnx']:
+for test_package in ['imodels', 'vowpalwabbit', 'skl2onnx', 'onnxmltools']:
     test_requires += extras_require[test_package]
 extras_require['tests'] = test_requires
 install_requires = ag.get_dependency_version_ranges(install_requires)

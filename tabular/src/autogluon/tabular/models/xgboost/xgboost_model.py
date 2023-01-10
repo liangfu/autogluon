@@ -2,6 +2,9 @@ import time
 import logging
 
 import psutil
+import numpy as np
+
+from xgboost import XGBClassifier, XGBRegressor
 
 from autogluon.common.features.types import R_BOOL, R_INT, R_FLOAT, R_CATEGORY
 from autogluon.common.utils.pandas_utils import get_approximate_df_mem_usage
@@ -13,6 +16,8 @@ from autogluon.core.utils import try_import_xgboost
 from autogluon.core.utils.exceptions import NotEnoughMemoryError
 
 from . import xgboost_utils
+from .compilers.native import XGBoostNativeCompiler
+from .compilers.onnx import XGBoostOnnxCompiler, XGBoostOnnxPredictor
 from .hyperparameters.parameters import get_param_baseline
 from .hyperparameters.searchspaces import get_default_searchspace
 
@@ -152,14 +157,22 @@ class XGBoostModel(AbstractModel):
         self.model.set_params(callbacks=None, eval_metric=None)
 
     def _predict_proba(self, X, num_cpus=-1, **kwargs):
-        X = self.preprocess(X, **kwargs)
-        self.model.set_params(n_jobs=num_cpus)
+        import time
 
+        tic = time.time()
+        X = self.preprocess(X, **kwargs)
+        if isinstance(self.model, (XGBClassifier, XGBRegressor)):
+            self.model.set_params(n_jobs=16) # num_cpus)
+        print(f"elapsed (preprocess): {(time.time()-tic)*1000:.1f} ms")
+
+        tic = time.time()
         if self.problem_type == REGRESSION:
             return self.model.predict(X)
 
-        y_pred_proba = self.model.predict_proba(X)
-        return self._convert_proba_to_unified_form(y_pred_proba)
+        y_pred_proba = self.model.predict_proba(X, validate_features=False)
+        ret = self._convert_proba_to_unified_form(y_pred_proba)
+        print(f"elapsed (predict_proba): {(time.time()-tic)*1000:.1f} ms {y_pred_proba[:1]}")
+        return ret
 
     def _get_early_stopping_rounds(self, num_rows_train, strategy='auto'):
         return get_early_stopping_rounds(num_rows_train=num_rows_train, strategy=strategy)
@@ -217,7 +230,7 @@ class XGBoostModel(AbstractModel):
         if _model is not None:
             self._xgb_model_type = _model.__class__
         path = super().save(path=path, verbose=verbose)
-        if _model is not None:
+        if _model is not None and not isinstance(_model, XGBoostOnnxPredictor):
             # Halves disk usage compared to .json / .pkl
             _model.save_model(path + 'xgb.ubj')
         self.model = _model
@@ -237,3 +250,35 @@ class XGBoostModel(AbstractModel):
         # `can_refit_full=True` because n_estimators is communicated at end of `_fit`:
         #  self.params_trained['n_estimators'] = bst.best_ntree_limit
         return {'can_refit_full': True}
+
+    def _get_input_types(self, batch_size=None) -> list:
+        """
+        Get input types as a list of tuples, containining shape and dtype.
+        This can be useful for building the input_types argument for
+        model compilation. This method can be overloaded in derived classes,
+        in order to satisfy class-specific requirements.
+
+        Parameters
+        ----------
+        batch_size : int, default=None
+            The batch size for all returned input types.
+
+        Returns
+        -------
+        List of (shape: Tuple[int], dtype: Any)
+        shape: Tuple[int]
+            A tuple that describes input
+        dtype: Any, default=np.float32
+            The element type in numpy dtype.
+        """
+        from collections import OrderedDict
+
+        assert isinstance(self._ohe_generator._feature_map, OrderedDict), \
+            f"invalid feature map type {type(self._ohe_generator._feature_map)}"
+        return [((batch_size, len(self._ohe_generator._feature_map)), np.float32)]
+
+    def _valid_compilers(self):
+        return [XGBoostNativeCompiler, XGBoostOnnxCompiler]
+
+    def _default_compiler(self):
+        return XGBoostNativeCompiler

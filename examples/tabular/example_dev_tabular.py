@@ -3,8 +3,12 @@
 import os
 import shutil
 import time
+import logging
+import numpy as np
 
 from autogluon.tabular import TabularDataset, TabularPredictor
+
+logging.getLogger().setLevel(logging.INFO)
 
 def main():
     # Training time:
@@ -15,11 +19,14 @@ def main():
     save_path = 'ag_models/'  # where to save trained models
     save_path_clone_opt = '~/Downloads/AdultIncomeBinaryClassificationModel_0_6_2'
     # save_path_clone_opt = 'ag_models_deploy/'  # where to save trained models
+    save_path_compiled = 'ag_models_compiled/'
 
     # if os.path.exists(save_path):
     #     shutil.rmtree(save_path, ignore_errors=True)
     # if os.path.exists(save_path_clone_opt):
     #     shutil.rmtree(save_path_clone_opt, ignore_errors=True)
+    if os.path.exists(save_path_compiled):
+        shutil.rmtree(save_path_compiled, ignore_errors=True)
 
     # # NOTE: Default settings above are intended to ensure reasonable runtime at the cost of accuracy. To maximize predictive accuracy, do this instead:
     # predictor = TabularPredictor(label=label, path=save_path).fit(train_data, hyperparameters={
@@ -34,6 +41,8 @@ def main():
     predictor = TabularPredictor.load(save_path_clone_opt)
     results = predictor.fit_summary()
 
+    dev_predictor = predictor.clone(save_path_compiled, return_clone=True)
+
     # Inference time:
     test_data = TabularDataset('https://autogluon.s3.amazonaws.com/datasets/Inc/test.csv')  # another Pandas DataFrame
     test_data = test_data.head()
@@ -41,16 +50,22 @@ def main():
     test_data = test_data.drop(labels=[label], axis=1)  # delete labels from test data since we wouldn't have them in practice
     # print(test_data.head())
 
-    # predictor = TabularPredictor.load(save_path)
+    dev_predictor.persist_models()
+    # dev_predictor.compile_models()
 
-    predictor.persist_models()
-    predictor.compile_models()
-
-    for _ in range(3):
+    y_proba_gt = predictor.predict_proba(test_data)
+    print(y_proba_gt)
+    for _ in range(10):
         tic = time.time()
-        y_pred = predictor.predict(test_data)
+        y_proba_dev = dev_predictor.predict_proba(test_data)
         print(f"elapsed: {(time.time()-tic)*1000:.0f} ms")
-    perf = predictor.evaluate_predictions(y_true=y_test, y_pred=y_pred, auxiliary_metrics=True)
+        # np.testing.assert_allclose(y_proba_gt.to_numpy(), y_proba_dev.to_numpy(), atol=1e-3, rtol=1e-3)
+        print(y_proba_dev)
+    y_pred = predictor.predict(test_data)
+    perf = dev_predictor.evaluate_predictions(y_true=y_test, y_pred=y_pred, auxiliary_metrics=True)
+    print(perf)
+    y_pred = dev_predictor.predict(test_data)
+    perf = dev_predictor.evaluate_predictions(y_true=y_test, y_pred=y_pred, auxiliary_metrics=True)
     print(perf)
 
 if __name__=="__main__":

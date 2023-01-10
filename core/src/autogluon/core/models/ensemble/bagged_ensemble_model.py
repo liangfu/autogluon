@@ -323,6 +323,7 @@ class BaggedEnsembleModel(AbstractModel):
         model = self.load_child(self.models[0])
         X = self.preprocess(X, model=model, **kwargs)
         pred_proba = model.predict_proba(X=X, preprocess_nonadaptive=False, normalize=normalize)
+        print(f"elapsed ({type(model)}): {(time.time()-tic)*1000:.1f} ms")
         for model in self.models[1:]:
             model = self.load_child(model)
             pred_proba += model.predict_proba(X=X, preprocess_nonadaptive=False, normalize=normalize)
